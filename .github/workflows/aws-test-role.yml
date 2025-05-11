@@ -9,8 +9,7 @@ on:
     branches: [ main ]
 
 env:
-  
-  AWS_REGION : <"us-west-2"> #Change to reflect your Region
+  AWS_REGION : us-west-2
 
 # Permission can be added at job level or workflow level    
 permissions:
@@ -25,7 +24,7 @@ jobs:
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v1.7.0
         with:
-          role-to-assume: <arn:aws:iam::111122223333:role/GitHubAction-AssumeRoleWithAction> #change to reflect your IAM role’s ARN
+          role-to-assume: arn:aws:iam::399585304222:role/valheim-server-cdk-deploy
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
       # Hello from AWS: WhoAmI
