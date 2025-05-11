@@ -1,0 +1,37 @@
+
+name: Valheim CDK deployment
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+    - name: Install Lambda dependencies
+      run: |
+        pip install -r lambda/functions/interactions/requirements.txt -t layers/flask/python
+    - name: Archive Lambda dependencies
+      uses: actions/upload-artifact@v4
+      with:
+        name: lambda-requirements
+        path: |
+          layers/flask/python
+    - name: Install CDK tools
+      run: |
+        apt-get -qq update && apt-get -y install nodejs npm
+        npm i -g aws-cdk
+        pip3 install -e cdk
+    - name: Execute CDK
+      run: |
+        cdk bootstrap --app cdk/app.py aws://$AWS_ACCOUNT_ID/$AWS_DEFAULT_REGION
+        cdk deploy --app cdk/app.py --require-approval never
