@@ -4,11 +4,14 @@ name: Valheim CDK deployment
 on: workflow_dispatch
 
 permissions:
-  contents: read
+  id-token: write  # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+
+env:
+  AWS_REGION : us-west-2
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -17,20 +20,31 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: "3.10"
+
+    - name: Configure aws credentials
+      uses: aws-actions/configure-aws-credentials@v1.7.0
+      with:
+        role-to-assume: arn:aws:iam::399585304222:role/valheim-server-cdk-deploy
+        role-session-name: GitHub_to_AWS_via_FederatedOIDC
+        aws-region: ${{ env.AWS_REGION }}
+          
     - name: Install Lambda dependencies
       run: |
         pip install -r lambda/functions/interactions/requirements.txt -t layers/flask/python
+        
     - name: Archive Lambda dependencies
       uses: actions/upload-artifact@v4
       with:
         name: lambda-requirements
         path: |
           layers/flask/python
+          
     - name: Install CDK tools
       run: |
         apt-get -qq update && apt-get -y install nodejs npm
         npm i -g aws-cdk
         pip3 install -e cdk
+        
     - name: Execute CDK
       run: |
         cdk bootstrap --app cdk/app.py aws://$AWS_ACCOUNT_ID/$AWS_DEFAULT_REGION
