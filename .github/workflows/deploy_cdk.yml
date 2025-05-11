@@ -13,6 +13,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: Production
 
     steps:
     - uses: actions/checkout@v4
@@ -26,7 +27,7 @@ jobs:
       with:
         role-to-assume: arn:aws:iam::399585304222:role/valheim-server-cdk-deploy
         role-session-name: GitHub_to_AWS_via_FederatedOIDC
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ${{ vars.AWS_DEFAULT_REGION }}
           
     - name: Install Lambda dependencies
       run: |
@@ -47,5 +48,5 @@ jobs:
         
     - name: Execute CDK
       run: |
-        cdk bootstrap --app cdk/app.py aws://$AWS_ACCOUNT_ID/$AWS_DEFAULT_REGION
+        cdk bootstrap --app cdk/app.py aws://${{ vars.AWS_ACCOUNT_ID }}/${{ vars.AWS_DEFAULT_REGION }}
         cdk deploy --app cdk/app.py --require-approval never
