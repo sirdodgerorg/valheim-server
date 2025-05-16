@@ -109,7 +109,7 @@ class ValheimServerStack(cdk.Stack):
                 "SERVER_PUBLIC": "false",
                 "ADMINLIST_IDS": " ".join(VALHEIM_ADMINS),
                 "BEPINEX": "true",
-                "POST_BOOTSTRAP_HOOK": "mkdir -p /config/bepinex/plugins && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install awscli && aws s3 sync s3://sirdodger-valheim-server-mods /config/bepinex/plugins",
+                "POST_BOOTSTRAP_HOOK": "apt-get update &> /dev/null && DEBIAN_FRONTEND=noninteractive apt-get -y install awscli &> /dev/null && aws s3 sync s3://sirdodger-valheim-server-mods /config/bepinex/plugins && echo plugins downloaded",
             },
         )
 
