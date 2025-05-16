@@ -58,6 +58,32 @@ class ValheimServerStack(cdk.Stack):
             ),
         )
 
+        # IAM execution role
+        iam_task_role = iam.Role(
+            self,
+            f"{BASENAME}FargateTaskRole",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            inline_policies={
+                f"{BASENAME}S3ModsDownload": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "s3:Get*",
+                                "s3:List*",
+                                "s3:Describe*",
+                                "s3-object-lambda:Get*",
+                                "s3-object-lambda:List*",
+                            ],
+                            resources=[
+                                "arn:aws:s3:::sirdodger-valheim-server-mods*",
+                            ],
+                        )
+                    ]
+                )
+            },
+        )
+
         # Fargate
         self.fargate_task = ecs.FargateTaskDefinition(
             self,
@@ -66,6 +92,7 @@ class ValheimServerStack(cdk.Stack):
             volumes=[self.volume],
             cpu=1024,  # 1 vCPU
             memory_limit_mib=4096,  # 4 GB
+            task_role=iam_task_role,
         )
 
         self.container = self.fargate_task.add_container(
