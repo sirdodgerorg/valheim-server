@@ -38,7 +38,6 @@ class ValheimServerStack(cdk.Stack):
                 owners=["568608671756"],
             ),
         )
-        Tags.of(nat_gateway_provider).add("project", PROJECT_TAG)
 
         # VPC
         self.vpc = ec2.Vpc(
