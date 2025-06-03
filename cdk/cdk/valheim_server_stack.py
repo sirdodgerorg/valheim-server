@@ -313,7 +313,7 @@ class ValheimServerStack(cdk.Stack):
         )
 
         # Lambda to stop NAT after the Fargate cluster scales down
-        stop_nat_lambda = _lambda.Function(
+        self.stop_nat_lambda = _lambda.Function(
             self,
             "StopNATLambda",
             runtime=_lambda.Runtime.PYTHON_3_12,
@@ -322,7 +322,7 @@ class ValheimServerStack(cdk.Stack):
             handler="update_dns.handler",
             timeout=cdk.Duration.seconds(60),
         )
-        stop_nat_lambda.add_to_role_policy(
+        self.stop_nat_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=[
@@ -331,7 +331,7 @@ class ValheimServerStack(cdk.Stack):
                 resources=[self.fargate_service.cluster.cluster_arn],
             )
         )
-        stop_nat_lambda.add_to_role_policy(
+        self.stop_nat_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=["ec2:StopInstances"],
@@ -362,7 +362,7 @@ class ValheimServerStack(cdk.Stack):
         )
         stop_nat_lambda_event_rule.add_target(
             aws_events_targets.LambdaFunction(
-                stop_nat_lambda,
+                self.stop_nat_lambda,
                 retry_attempts=0,
             )
         )
