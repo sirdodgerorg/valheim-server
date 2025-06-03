@@ -50,7 +50,9 @@ def get_eni_public_ip(eni_id: str) -> str:
     return response["NetworkInterfaces"][0].get("Association", {}).get("PublicIp")
 
 
-def upsert_route53_recordset(cluster_name: str, hosted_zone_id: str, domain: str, public_ip: str) -> bool:
+def upsert_route53_recordset(
+    cluster_name: str, hosted_zone_id: str, domain: str, public_ip: str
+) -> bool:
     """
     Upserts a route53 recordset.
 
@@ -68,12 +70,8 @@ def upsert_route53_recordset(cluster_name: str, hosted_zone_id: str, domain: str
             "Name": domain,
             "Type": "A",
             "TTL": 60,
-            "ResourceRecords": [
-                {
-                    "Value": public_ip
-                }
-            ]
-        }
+            "ResourceRecords": [{"Value": public_ip}],
+        },
     }
 
     client = boto3.client("route53")
@@ -81,8 +79,8 @@ def upsert_route53_recordset(cluster_name: str, hosted_zone_id: str, domain: str
         HostedZoneId=hosted_zone_id,
         ChangeBatch={
             "Comment": f"Updated by XXXXXX-fargate-task-dns lambda for cluster {cluster_name}",
-            "Changes": [change]
-        }
+            "Changes": [change],
+        },
     )
     print(f"Route53 response: {response}")
 
@@ -122,12 +120,12 @@ def handler(event, context):
         return
 
     service_name = task["group"].split("service:")[1]
-    
+
     success = upsert_route53_recordset(
         cluster_name=cluster_name,
         hosted_zone_id=hosted_zone_id,
         domain=domain,
-        public_ip=task_public_ip
+        public_ip=task_public_ip,
     )
 
     if success:

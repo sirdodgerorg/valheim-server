@@ -311,3 +311,58 @@ class ValheimServerStack(cdk.Stack):
                 retry_attempts=0,
             )
         )
+
+        # Lambda to stop NAT after the Fargate cluster scales down
+        stop_nat_lambda = _lambda.Function(
+            self,
+            "StopNATLambda",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            code=_lambda.AssetCode("../lambda/functions/nat"),
+            function_name="stop-vpc-nat",
+            handler="update_dns.handler",
+            timeout=cdk.Duration.seconds(60),
+        )
+        stop_nat_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "ecs:ListTagsForResource",
+                ],
+                resources=[self.fargate_service.cluster.cluster_arn],
+            )
+        )
+        stop_nat_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["ec2:StopInstances"],
+                resources=[
+                    # No task exists yet, so no ENI exists yet either.  Grant the
+                    # Lambda wide access to fetching ENI details
+                    "arn:aws:ec2:*:*:instance/*",
+                ],
+                conditions={
+                    "StringEquals": {
+                        "aws:ResourceTag/project": PROJECT_TAG,
+                    },
+                },
+            )
+        )
+
+        stop_nat_lambda_event_pattern = events.EventPattern(
+            source=["aws.ecs"],
+            detail_type=["ECS Task State Change"],
+            detail={"desiredStatus": ["STOPPED"], "lastStatus": ["RUNNING"]},
+            # EventBridge is not matching this ARN and delivering the event to the lambda
+            # resources=[f"arn:aws:ecs:::task/{self.cluster.cluster_name}/*"],
+        )
+        stop_nat_lambda_event_rule = events.Rule(
+            self,
+            "StopNATLambdaEventRule",
+            event_pattern=stop_nat_lambda_event_pattern,
+        )
+        stop_nat_lambda_event_rule.add_target(
+            aws_events_targets.LambdaFunction(
+                stop_nat_lambda,
+                retry_attempts=0,
+            )
+        )
