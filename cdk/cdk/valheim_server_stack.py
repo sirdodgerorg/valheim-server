@@ -16,7 +16,6 @@ from aws_cdk import (
     Tags,
 )
 
-
 BASENAME = "Valheim"
 PROJECT_TAG = "valheim"
 VALHEIM_ADMINS = [
@@ -29,9 +28,25 @@ class ValheimServerStack(cdk.Stack):
     def __init__(self, scope, construct_id, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # NAT instance in non-HA mode
+        nat_gateway_provider = ec2.NatInstanceProviderV2(
+            instance_type=ec2.InstanceType.of(
+                ec2.InstanceClass.T4G, ec2.InstanceSize.NANO
+            ),
+            machine_image=ec2.LookupMachineImage(
+                name="fck-nat-al2023-*-arm64-ebs",
+                owners=["568608671756"],
+            ),
+        )
+
         # VPC
-        self.vpc = ec2.Vpc(self, f"{BASENAME}VPC", max_azs=1)
+        self.vpc = ec2.Vpc(
+            self, f"{BASENAME}VPC", max_azs=1, nat_gateway_provider=nat_gateway_provider
+        )
         Tags.of(self.vpc).add("project", PROJECT_TAG)
+        nat_gateway_provider.security_group.add_ingress_rule(
+            ec2.Peer.ipv4(self.vpc.vpc_cidr_block), ec2.Port.all_traffic()
+        )
 
         # Cluster to group container instances
         self.cluster = ecs.Cluster(self, f"{BASENAME}Cluster", vpc=self.vpc)
