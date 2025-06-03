@@ -217,6 +217,22 @@ class ValheimServerStack(cdk.Stack):
                 managed_policy_arn="arn:aws:iam::aws:policy/AmazonECS_FullAccess",
             )
         )
+        self.flask_app_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["ec2:StartInstances"],
+                resources=[
+                    # No task exists yet, so no ENI exists yet either.  Grant the
+                    # Lambda wide access to fetching ENI details
+                    "arn:aws:ec2:*:*:instance/*",
+                ],
+                conditions={
+                    "StringEquals": {
+                        "aws:ResourceTag/project": PROJECT_TAG,
+                    },
+                },
+            )
+        )
 
         # https://slmkitani.medium.com/passing-custom-headers-through-amazon-api-gateway-to-an-aws-lambda-function-f3a1cfdc0e29
         self.request_templates = {
