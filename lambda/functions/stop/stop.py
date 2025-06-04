@@ -22,7 +22,7 @@ def handler(event, context):
         desiredCount=0,
     )
 
-    url = f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original"
+    url = f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/{event['message_id']}"
     data = {
         "type": 4,
         "data": {
@@ -33,5 +33,5 @@ def handler(event, context):
     }
     logger.info(f"Editing message: {url} with {data}")
     resp = requests.patch(url, data=data)
-    logger.info(f"Discord response: {resp.json}")
+    logger.info(f"Discord response ({resp.status_code}): {resp.json()}")
     return {"statusCode": 200}

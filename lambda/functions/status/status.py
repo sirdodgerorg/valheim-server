@@ -44,7 +44,7 @@ def handler(event, context):
     nat_state = nat_instance.state.get("Name") if nat_instance else "none"
 
     content = f"Desired: {desired} | Running: {running} | Pending: {pending}; NAT: {nat_state}"
-    url = f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original"
+    url = f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/{event['message_id']}"
     data = {
         "type": 4,
         "data": {
@@ -55,5 +55,5 @@ def handler(event, context):
     }
     logger.info(f"Updating: {url} with {data}")
     resp = requests.patch(url, data=data)
-    logger.info(f"Discord response ({resp.status_code}): {resp.json}")
+    logger.info(f"Discord response ({resp.status_code}): {resp.json()}")
     return {"statusCode": 200}
