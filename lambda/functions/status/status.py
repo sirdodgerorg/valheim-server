@@ -42,18 +42,11 @@ def handler(event, context):
     nat_instance = get_nat_instance(stack_name="ValheimServerStack")
 
     nat_state = nat_instance.state.get("Name") if nat_instance else "none"
-
-    content = f"Desired: {desired} | Running: {running} | Pending: {pending}; NAT: {nat_state}"
-    url = f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/{event['message_id']}"
-    data = {
-        "type": 4,
-        "data": {
-            "content": content,
-            "embeds": [],
-            "allowed_mentions": {"parse": []},
+    resp = requests.patch(
+        f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original",
+        data={
+            "content": f"Desired: {desired} | Running: {running} | Pending: {pending}; NAT: {nat_state}",
         },
-    }
-    logger.info(f"Updating: {url} with {data}")
-    resp = requests.patch(url, data=data)
+    )
     logger.info(f"Discord response ({resp.status_code}): {resp.json()}")
     return {"statusCode": 200}
