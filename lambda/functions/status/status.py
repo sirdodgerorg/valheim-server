@@ -11,14 +11,16 @@ ec2 = boto3.client("ec2")
 ecs = boto3.client("ecs")
 
 
-def get_nat_instance(name: str):
+def get_nat_instance(stack_name: str):
     """Retrieve the NAT instance"""
-
+    ec2 = boto3.client("ec2")
     response = ec2.describe_instances(
         Filters=[
             {
                 "Name": "tag:Name",
-                "Values": [name],
+                "Values": [
+                    f"{stack_name}/ValheimVPC/PublicSubnet1/NatInstance",
+                ],
             },
         ],
     )
@@ -37,7 +39,8 @@ def handler(event, context):
     running = resp["services"][0]["runningCount"]
     pending = resp["services"][0]["pendingCount"]
 
-    nat_instance = get_nat_instance()
+    nat_instance = get_nat_instance(stack_name="ValheimServerStack")
+
     nat_state = nat_instance.state.get("Name") if nat_instance else "none"
 
     content = f"Desired: {desired} | Running: {running} | Pending: {pending}; NAT: {nat_state}"
@@ -51,5 +54,6 @@ def handler(event, context):
         },
     }
     logger.info(f"Updating: {url} with {data}")
-    requests.patch(url, data=data)
+    resp = requests.patch(url, data=data)
+    logger.info(f"Discord response ({resp.status_code}): {resp.json}")
     return {"statusCode": 200}

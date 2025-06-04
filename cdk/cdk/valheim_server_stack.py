@@ -211,12 +211,18 @@ class ValheimServerStack(cdk.Stack):
         Tags.of(self.server_start).add("project", PROJECT_TAG)
         self.add_iam_ecs(target_lambda=self.server_start)
         self.add_iam_ec2(target_lambda=self.server_start)
+        self.add_iam_ec2_describe(target_lambda=self.server_start)
 
         self.server_status = self.create_lambda(
             name="status", environment=self.env_vars, layers=[lambda_layer]
         )
         Tags.of(self.server_status).add("project", PROJECT_TAG)
         self.add_iam_ec2(target_lambda=self.server_status)
+        self.add_iam_ec2_describe(target_lambda=self.server_status)
+        self.add_iam_ecs_describe_services(
+            target_lambda=self.server_status,
+            service_arn=self.fargate_service.service_arn,
+        )
 
         self.server_stop = self.create_lambda(
             name="stop", environment=self.env_vars, layers=[lambda_layer]
@@ -281,6 +287,8 @@ class ValheimServerStack(cdk.Stack):
             cluster_arn=self.fargate_service.cluster.cluster_arn,
         )
         self.add_iam_ec2(target_lambda=self.stop_nat_lambda)
+        self.add_iam_ec2_describe(target_lambda=self.stop_nat_lambda)
+
         self.subscribe_event_bridge_ecs_task_change(
             target_lambda=self.stop_nat_lambda,
             desired_status="STOPPED",
@@ -312,13 +320,36 @@ class ValheimServerStack(cdk.Stack):
         target_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
-                actions=["ec2:Describe*", "ec2:StartInstances", "ec2:StopInstances"],
+                actions=["ec2:StartInstances", "ec2:StopInstances"],
                 resources=["*"],
                 conditions={
                     "StringEquals": {
                         "aws:ResourceTag/project": PROJECT_TAG,
                     },
                 },
+            )
+        )
+
+    def add_iam_ec2_describe(self, target_lambda: _lambda.Function):
+        """Permission to describe an ec2 instance. Describe* actions do not seem to
+        work with conditions."""
+        target_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW, actions=["ec2:Describe*"], resources=["*"]
+            )
+        )
+
+    def add_iam_ecs_describe_services(
+        self, target_lambda: _lambda.Function, service_arn: str
+    ):
+        """Permission to describe cluster status."""
+        target_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "ecs:DescribeServices",
+                ],
+                resources=[service_arn],
             )
         )
 

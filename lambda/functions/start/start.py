@@ -11,14 +11,16 @@ ec2 = boto3.client("ec2")
 ecs = boto3.client("ecs")
 
 
-def get_nat_instance(name: str):
+def get_nat_instance(stack_name: str):
     """Retrieve the NAT instance"""
-
+    ec2 = boto3.client("ec2")
     response = ec2.describe_instances(
         Filters=[
             {
                 "Name": "tag:Name",
-                "Values": [name],
+                "Values": [
+                    f"{stack_name}/ValheimVPC/PublicSubnet1/NatInstance",
+                ],
             },
         ],
     )
@@ -30,7 +32,7 @@ def handler(event, context):
     logger.info(f"Received event: {event}")
 
     content = "Starting the server"
-    nat_instance = get_nat_instance()
+    nat_instance = get_nat_instance(stack_name="ValheimServerStack")
 
     # Start NAT
     nat_instance.start()
