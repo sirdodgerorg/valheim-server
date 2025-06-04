@@ -29,25 +29,18 @@ def get_nat_instance(name: str):
 def handler(event, context):
     logger.info(f"Received event: {event}")
 
-    try:
-        resp = ecs.describe_services(
-            cluster=event["ecs_cluster_arn"],
-            services=[event["ecs_service_name"]],
-        )
-        desired = resp["services"][0]["desiredCount"]
-        running = resp["services"][0]["runningCount"]
-        pending = resp["services"][0]["pendingCount"]
+    resp = ecs.describe_services(
+        cluster=event["ecs_cluster_arn"],
+        services=[event["ecs_service_name"]],
+    )
+    desired = resp["services"][0]["desiredCount"]
+    running = resp["services"][0]["runningCount"]
+    pending = resp["services"][0]["pendingCount"]
 
-        nat_instance = get_nat_instance()
-        nat_state = nat_instance.state.get("Name") if nat_instance else "none"
+    nat_instance = get_nat_instance()
+    nat_state = nat_instance.state.get("Name") if nat_instance else "none"
 
-        content = f"Desired: {desired} | Running: {running} | Pending: {pending}; NAT: {nat_state}"
-
-    except boto3.Error as e:
-        content = "Could not get server status"
-        logger.info("Could not get the server status")
-        logger.info(e)
-
+    content = f"Desired: {desired} | Running: {running} | Pending: {pending}; NAT: {nat_state}"
     url = f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original"
     data = {
         "type": 4,
