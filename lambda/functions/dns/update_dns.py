@@ -1,6 +1,10 @@
-import json
+import logging
 
 import boto3
+
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
 def fetch_cluster_tags(cluster_arn: str) -> dict[str, str]:
@@ -46,7 +50,7 @@ def get_eni_public_ip(eni_id: str) -> str:
     """
     client = boto3.client("ec2")
     response = client.describe_network_interfaces(NetworkInterfaceIds=[eni_id])
-    print(f"ENI response: {response}")
+    logger.info(f"ENI response: {response}")
     return response["NetworkInterfaces"][0].get("Association", {}).get("PublicIp")
 
 
@@ -82,7 +86,7 @@ def upsert_route53_recordset(
             "Changes": [change],
         },
     )
-    print(f"Route53 response: {response}")
+    logger.info(f"Route53 response: {response}")
 
     if response["ResponseMetadata"]["HTTPStatusCode"] == 200:
         return True
@@ -90,36 +94,38 @@ def upsert_route53_recordset(
 
 def handler(event, context):
 
-    print(f"Received event: {event}")
+    logger.info(f"Received event: {event}")
 
     task = event["detail"]
     cluster_arn = task["clusterArn"]
     cluster_name = cluster_arn.split(":cluster/")[1]
 
     tags = fetch_cluster_tags(cluster_arn=cluster_arn)
-    print(f"Fetched tags: {tags}")
+    logger.info(f"Fetched tags: {tags}")
     domain = tags.get("ROUTE53_DOMAIN")
     hosted_zone_id = tags.get("ROUTE53_HOSTED_ZONE_ID")
 
     if not domain:
-        print(f"Cluster {cluster_name} missing domain tag, skipping DNS update")
+        logger.info(f"Cluster {cluster_name} missing domain tag, skipping DNS update")
         return
 
     if not hosted_zone_id:
-        print(f"Cluster {cluster_name} missing hosted_zone_id tag, skipping DNS update")
+        logger.info(
+            f"Cluster {cluster_name} missing hosted_zone_id tag, skipping DNS update"
+        )
         return
 
     eni_id = get_eni_id(task=task)
     if not eni_id:
-        print(f"Task {task["taskArn"]} missing network interface, skipping DNS update")
+        logger.info(
+            f"Task {task["taskArn"]} missing network interface, skipping DNS update"
+        )
         return
 
     task_public_ip = get_eni_public_ip(eni_id=eni_id)
     if not task_public_ip:
-        print(f"Task {task["taskArn"]} missing public IP, skipping DNS update")
+        logger.info(f"Task {task["taskArn"]} missing public IP, skipping DNS update")
         return
-
-    service_name = task["group"].split("service:")[1]
 
     success = upsert_route53_recordset(
         cluster_name=cluster_name,
@@ -129,7 +135,7 @@ def handler(event, context):
     )
 
     if success:
-        print(f"Successfully updated DNS for {cluster_name} to {task_public_ip}")
+        logger.info(f"Successfully updated DNS for {cluster_name} to {task_public_ip}")
         return {"statusCode": 200}
 
     raise Exception(f"Failed to update DNS")

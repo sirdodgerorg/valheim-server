@@ -16,6 +16,7 @@ from aws_cdk import (
     Tags,
 )
 
+
 BASENAME = "Valheim"
 PROJECT_TAG = "valheim"
 VALHEIM_ADMINS = [
@@ -181,11 +182,12 @@ class ValheimServerStack(cdk.Stack):
             )
         )
 
-        # Environment for Discord -> Lambda server
+        # Environment for Discord -> Lambda interaction controls
         self.env_vars = {
             "APPLICATION_PUBLIC_KEY": os.environ.get("APPLICATION_PUBLIC_KEY"),
             "ECS_SERVICE_NAME": self.fargate_service.service_name,
             "ECS_CLUSTER_ARN": self.fargate_service.cluster.cluster_arn,
+            "NAT_NAME": self.nat,
         }
 
         self.flask_lambda_layer = _lambda.LayerVersion(
@@ -197,7 +199,7 @@ class ValheimServerStack(cdk.Stack):
             ],
         )
 
-        self.flask_app_lambda = _lambda.Function(
+        self.discord_interaction_handler = _lambda.Function(
             self,
             "FlaskAppLambda",
             runtime=_lambda.Runtime.PYTHON_3_12,
@@ -205,37 +207,33 @@ class ValheimServerStack(cdk.Stack):
             function_name="discord-interaction-handler",
             handler="discord_handler.handler",
             layers=[self.flask_lambda_layer],
-            timeout=cdk.Duration.seconds(60),
+            timeout=self.DURATION_60_SECONDS,
             environment={**self.env_vars},
         )
         Tags.of(self.flask_app_lambda).add("project", PROJECT_TAG)
+        self.add_iam_lambda_invoke(target_lambda=self.discord_interaction_handler)
 
-        self.flask_app_lambda.role.add_managed_policy(
-            iam.ManagedPolicy.from_managed_policy_arn(
-                self,
-                "ECS_FullAccessPolicy",
-                managed_policy_arn="arn:aws:iam::aws:policy/AmazonECS_FullAccess",
-            )
+        self.server_start = self.create_server_control_lambda(
+            name="start", environment=self.env_vars
         )
-        self.flask_app_lambda.add_to_role_policy(
-            iam.PolicyStatement(
-                effect=iam.Effect.ALLOW,
-                actions=["ec2:StartInstances"],
-                resources=[
-                    # No task exists yet, so no ENI exists yet either.  Grant the
-                    # Lambda wide access to fetching ENI details
-                    "arn:aws:ec2:*:*:instance/*",
-                ],
-                conditions={
-                    "StringEquals": {
-                        "aws:ResourceTag/project": PROJECT_TAG,
-                    },
-                },
-            )
+        Tags.of(self.server_start).add("project", PROJECT_TAG)
+        self.add_iam_ecs(target_lambda=self.server_start)
+        self.add_iam_ec2(target_lambda=self.server_start)
+
+        self.server_status = self.create_server_control_lambda(
+            name="status", environment=self.env_vars
         )
+        Tags.of(self.server_status).add("project", PROJECT_TAG)
+        self.add_iam_ec2(target_lambda=self.server_status)
+
+        self.server_stop = self.create_server_control_lambda(
+            name="stop", environment=self.env_vars
+        )
+        Tags.of(self.server_stop).add("project", PROJECT_TAG)
+        self.add_iam_ec2(target_lambda=self.server_stop)
 
         # https://slmkitani.medium.com/passing-custom-headers-through-amazon-api-gateway-to-an-aws-lambda-function-f3a1cfdc0e29
-        self.request_templates = {
+        request_templates = {
             "application/json": """{
                 "method": "$context.httpMethod",
                 "body" : $input.json("$"),
@@ -254,7 +252,7 @@ class ValheimServerStack(cdk.Stack):
         self.apigateway.root.add_method("ANY")
         self.discord_interaction_webhook = self.apigateway.root.add_resource("discord")
         self.discord_interaction_webhook_integration = apigw.LambdaIntegration(
-            self.flask_app_lambda, request_templates=self.request_templates
+            self.flask_app_lambda, request_templates=request_templates
         )
         self.discord_interaction_webhook.add_method(
             "POST", self.discord_interaction_webhook_integration
@@ -270,16 +268,113 @@ class ValheimServerStack(cdk.Stack):
             handler="update_dns.handler",
             timeout=cdk.Duration.seconds(60),
         )
-        self.dns_lambda.add_to_role_policy(
+        self.add_iam_ecs_list_tags(
+            target_lambda=self.dns_lambda,
+            cluster_arn=self.fargate_service.cluster.cluster_arn,
+        )
+        self.add_iam_route53_update(
+            target_lambda=self.dns_lambda, hosted_zone_id=hosted_zone_id
+        )
+
+        # The state change from RUNNING -> RUNNING seems to be the best since
+        # the ENI is attached after the task is already running, so this is
+        # the narrowest filter.
+        # https://medium.com/@andreas.pasch/automatic-public-dns-for-fargate-managed-containers-in-amazon-ecs-f0ca0a0334b5
+        self.subscribe_event_bridge_ecs_task_change(
+            target_lambda=self.dns_lambda,
+            desired_status="RUNNING",
+            last_status="RUNNING",
+        )
+
+        # Lambda to stop NAT after the Fargate cluster scales down
+        self.stop_nat_lambda = _lambda.Function(
+            self,
+            "StopNATLambda",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            code=_lambda.AssetCode("../lambda/functions/nat"),
+            function_name="stop-vpc-nat",
+            handler="stop_nat.handler",
+            timeout=cdk.Duration.seconds(60),
+        )
+        self.add_iam_ecs_list_tags(
+            target_lambda=self.stop_nat_lambda,
+            cluster_arn=self.fargate_service.cluster.cluster_arn,
+        )
+        self.add_iam_ec2(target_lambda=self.stop_nat_lambda)
+
+        self.subscribe_event_bridge_ecs_task_change(
+            target_lambda=self.stop_nat_lambda,
+            desired_status="STOPPED",
+            last_status="RUNNING",
+        )
+
+    def add_iam_ecs(self, target_lambda: _lambda.Function):
+        """Permissions necessary to scale the cluster up and down.
+
+        TODO: These permissions are overly broad.
+        """
+        target_lambda.add_managed_policy(
+            iam.ManagedPolicy.from_managed_policy_arn(
+                self,
+                "ECS_FullAccessPolicy",
+                managed_policy_arn="arn:aws:iam::aws:policy/AmazonECS_FullAccess",
+            )
+        )
+
+    def add_iam_ec2(self, target_lambda: _lambda.Function):
+        """Permission to start an ec2 instance.
+
+        TODO: The resource ARN is unknown since the instance is created on demand,
+        but see if tighter permissions can be achieved by setting conditions on
+        the cluster/task creating the instance.
+
+        Also needs access to the NAT instance.
+        """
+        target_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["ec2:Describe*", "ec2:StartInstances", "ec2:StopInstances"],
+                resources=["*"],
+                conditions={
+                    "StringEquals": {
+                        "aws:ResourceTag/project": PROJECT_TAG,
+                    },
+                },
+            )
+        )
+
+    def add_iam_ecs_list_tags(self, target_lambda: _lambda.Function, cluster_arn: str):
+        """Permission to list tags for the cluster."""
+        target_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=[
                     "ecs:ListTagsForResource",
                 ],
-                resources=[self.fargate_service.cluster.cluster_arn],
+                resources=[cluster_arn],
             )
         )
-        self.dns_lambda.add_to_role_policy(
+
+    def add_iam_lambda_invoke(self, target_lambda: _lambda.Function):
+        """Permission to invoke Valheim server control lambdas."""
+
+        target_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["lambda:InvokeFunction"],
+                resources=["arn:aws:lambda:::function:valheim*"],
+                conditions={
+                    "StringEquals": {
+                        "aws:ResourceTag/project": PROJECT_TAG,
+                    },
+                },
+            )
+        )
+
+    def add_iam_route53_update(
+        self, target_lambda: _lambda.Function, hosted_zone_id: str
+    ):
+        target_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=[
@@ -292,93 +387,49 @@ class ValheimServerStack(cdk.Stack):
                 ],
             )
         )
-        self.dns_lambda.add_to_role_policy(
+        target_lambda.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=[
                     "route53:ChangeResourceRecordSets",
                 ],
                 resources=[
-                    # Hardcoded hosted zone for the NS subdomain
                     f"arn:aws:route53:::hostedzone/{hosted_zone_id}",
                 ],
             )
         )
 
-        # The state change from RUNNING -> RUNNING seems to be the best since
-        # the ENI is attached after the task is already running, so this is
-        # the narrowest filter.
-        # https://medium.com/@andreas.pasch/automatic-public-dns-for-fargate-managed-containers-in-amazon-ecs-f0ca0a0334b5
-        dns_lambda_event_pattern = events.EventPattern(
-            source=["aws.ecs"],
-            detail_type=["ECS Task State Change"],
-            detail={"desiredStatus": ["RUNNING"], "lastStatus": ["RUNNING"]},
-            # EventBridge is not matching this ARN and delivering the event to the lambda
-            # resources=[f"arn:aws:ecs:::task/{self.cluster.cluster_name}/*"],
-        )
-        dns_lambda_event_rule = events.Rule(
+    def create_server_control_lambda(self, name: str, environment: dict):
+        return _lambda.Function(
             self,
-            "DNSLambdaEventRule",
-            event_pattern=dns_lambda_event_pattern,
-        )
-        dns_lambda_event_rule.add_target(
-            aws_events_targets.LambdaFunction(
-                self.dns_lambda,
-                retry_attempts=0,
-            )
-        )
-
-        # Lambda to stop NAT after the Fargate cluster scales down
-        self.stop_nat_lambda = _lambda.Function(
-            self,
-            "StopNATLambda",
+            f"{BASENAME}{name.capitalize()}Lambda",
             runtime=_lambda.Runtime.PYTHON_3_12,
-            code=_lambda.AssetCode("../lambda/functions/nat"),
-            function_name="stop-vpc-nat",
-            handler="update_dns.handler",
+            code=_lambda.AssetCode(f"../lambda/functions/{name}"),
+            function_name=f"{BASENAME.lower()}-{name}",
+            handler=f"{name}.handler",
+            layers=[],
             timeout=cdk.Duration.seconds(60),
-        )
-        self.stop_nat_lambda.add_to_role_policy(
-            iam.PolicyStatement(
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "ecs:ListTagsForResource",
-                ],
-                resources=[self.fargate_service.cluster.cluster_arn],
-            )
-        )
-        self.stop_nat_lambda.add_to_role_policy(
-            iam.PolicyStatement(
-                effect=iam.Effect.ALLOW,
-                actions=["ec2:StopInstances"],
-                resources=[
-                    # No task exists yet, so no ENI exists yet either.  Grant the
-                    # Lambda wide access to fetching ENI details
-                    "arn:aws:ec2:*:*:instance/*",
-                ],
-                conditions={
-                    "StringEquals": {
-                        "aws:ResourceTag/project": PROJECT_TAG,
-                    },
-                },
-            )
+            environment=environment,
         )
 
-        stop_nat_lambda_event_pattern = events.EventPattern(
+    def subscribe_event_bridge_ecs_task_change(
+        self, target_lambda: _lambda.Function, desired_status: str, last_status: str
+    ):
+        event_pattern = events.EventPattern(
             source=["aws.ecs"],
             detail_type=["ECS Task State Change"],
-            detail={"desiredStatus": ["STOPPED"], "lastStatus": ["RUNNING"]},
+            detail={"desiredStatus": [desired_status], "lastStatus": [last_status]},
             # EventBridge is not matching this ARN and delivering the event to the lambda
             # resources=[f"arn:aws:ecs:::task/{self.cluster.cluster_name}/*"],
         )
-        stop_nat_lambda_event_rule = events.Rule(
+        event_rule = events.Rule(
             self,
-            "StopNATLambdaEventRule",
-            event_pattern=stop_nat_lambda_event_pattern,
+            f"{target_lambda.id}EventRule",
+            event_pattern=event_pattern,
         )
-        stop_nat_lambda_event_rule.add_target(
+        event_rule.add_target(
             aws_events_targets.LambdaFunction(
-                self.stop_nat_lambda,
+                target_lambda,
                 retry_attempts=0,
             )
         )

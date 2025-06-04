@@ -1,4 +1,10 @@
+import logging
+
 import boto3
+
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
 def fetch_cluster_tags(cluster_arn: str) -> dict[str, str]:
@@ -35,18 +41,18 @@ def get_nat_instance(stack_name: str):
 
 def handler(event, context):
 
-    print(f"Received event: {event}")
+    logger.info(f"Received event: {event}")
 
     task = event["detail"]
     cluster_arn = task["clusterArn"]
 
     tags = fetch_cluster_tags(cluster_arn=cluster_arn)
-    print(f"Fetched tags: {tags}")
+    logger.info(f"Fetched tags: {tags}")
 
     stack_name = tags.get("aws:cloudformation:stack-name")
     if stack_name == "ValheimServerStack":
         nat_instance = get_nat_instance(stack_name=stack_name)
-        print(f"Stopping NAT instance: {nat_instance.instance_id}")
+        logger.info(f"Stopping NAT instance: {nat_instance.instance_id}")
         nat_instance.stop()
 
     return {"statusCode": 200}
