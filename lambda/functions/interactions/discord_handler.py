@@ -7,116 +7,70 @@ from discord_interactions import verify_key_decorator
 from flask import Flask, jsonify, request
 
 
+INTERACTIONS = {"start", "stop", "status"}
+
 # Your public key can be found on your application in the Developer Portal
 PUBLIC_KEY = os.environ.get("APPLICATION_PUBLIC_KEY")
-
-
-ec2 = boto3.client("ec2")
-ecs = boto3.client("ecs")
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 app = Flask(__name__)
-
-
-def get_nat_instance():
-    """Retrieve the NAT instance"""
-
-    response = ec2.describe_instances(
-        Filters=[
-            {
-                "Name": "tag:Name",
-                "Values": [
-                    "ValheimServerStack/ValheimVPC/PublicSubnet1/NatInstance",
-                ],
-            },
-        ],
-    )
-    instance_id = response["Reservations"][0]["Instances"][0]["InstanceId"]
-    return boto3.resource("ec2").Instance(instance_id)
+aws_lambda = boto3.client("lambda")
 
 
 @app.route("/discord", methods=["POST"])
 @verify_key_decorator(PUBLIC_KEY)
 def index():
-    if request.json["type"] == 1:
+    """Discord interaction Lambda must return within three seconds or else Discord marks
+    the interaction as a failure.  Perform significant work in secondary lambdas.
+    """
+    request_json = request.json
+
+    # Respond to ping
+    if request_json["type"] == 1:
         return jsonify({"type": 1})
+    # Process command
     else:
-        logger.info(request.json)
+        logger.info(f"Request: {request_json}")
         try:
-            interaction_option = request.json["data"]["options"][0]["value"]
+            interaction_option = request_json["data"]["options"][0]["value"]
         except KeyError:
-            logger.info("Could not parse the interaction option")
-            interaction_option = "status"
+            interaction_option = None
+            logger.error("Unparseable interaction option")
 
-        logger.info("Interaction:")
-        logger.info(interaction_option)
+        if interaction_option not in INTERACTIONS:
+            logger.error("Invalid interaction option: %s", interaction_option)
+            raise ValueError
 
-        content = ""
+        logger.info(f"Interaction: {interaction_option}")
 
-        nat_instance = get_nat_instance()
+        payload = {
+            # Pass Discord application_id and token to edit the response from other lambdas
+            "application_id": request_json["application_id"],
+            "token": request_json["token"],
+            # Pass environmental info identifying resources to query/modify
+            "ecs_cluster_arn": os.environ.get("ECS_CLUSTER_ARN", ""),
+            "ecs_service_name": os.environ.get("ECS_SERVICE_NAME", ""),
+            "nat_name": "ValheimServerStack/ValheimVPC/PublicSubnet1/NatInstance",
+        }
 
-        if interaction_option == "status":
-            try:
-
-                resp = ecs.describe_services(
-                    cluster=os.environ.get("ECS_CLUSTER_ARN", ""),
-                    services=[
-                        os.environ.get("ECS_SERVICE_NAME", ""),
-                    ],
-                )
-                desired_count = resp["services"][0]["desiredCount"]
-                running_count = resp["services"][0]["runningCount"]
-                pending_count = resp["services"][0]["pendingCount"]
-
-                content = f"Desired: {desired_count} | Running: {running_count} | Pending: {pending_count}; NAT: {nat_instance.state}"
-
-            except boto3.Error as e:
-                content = "Could not get server status"
-                logger.info("Could not get the server status")
-                logger.info(e)
-
-        elif interaction_option == "start":
-            content = "Starting the server"
-
-            # Start NAT
-            nat_instance.start()
-            nat_instance.wait_until_running()
-
-            # Scale up Fargate server
-            resp = ecs.update_service(
-                cluster=os.environ.get("ECS_CLUSTER_ARN", ""),
-                service=os.environ.get("ECS_SERVICE_NAME", ""),
-                desiredCount=1,
-            )
-
-        elif interaction_option == "stop":
-            content = "Stopping the server"
-
-            # Scale down Fargate server
-            resp = ecs.update_service(
-                cluster=os.environ.get("ECS_CLUSTER_ARN", ""),
-                service=os.environ.get("ECS_SERVICE_NAME", ""),
-                desiredCount=0,
-            )
-
-        else:
-            content = "Unknown command"
-
-        logger.info(resp)
-
-        return jsonify(
-            {
-                "type": 4,
-                "data": {
-                    "tts": False,
-                    "content": content,
-                    "embeds": [],
-                    "allowed_mentions": {"parse": []},
-                },
-            }
+        aws_lambda.invoke(
+            function_name=f"valheim-{interaction_option}",
+            invocation_type="Event",
+            payload=payload,
         )
+
+        response = {
+            "type": 4,  # Respond with message
+            "data": {
+                "tts": False,
+                "content": "Pending...",
+                "embeds": [],
+                "allowed_mentions": {"parse": []},
+            },
+        }
+        return jsonify(response)
 
 
 def handler(event, context):
