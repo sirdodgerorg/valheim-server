@@ -206,10 +206,10 @@ class ValheimServerStack(cdk.Stack):
             function_name="discord-interaction-handler",
             handler="discord_handler.handler",
             layers=[self.flask_lambda_layer],
-            timeout=self.DURATION_60_SECONDS,
+            timeout=cdk.Duration.seconds(5),
             environment={**self.env_vars},
         )
-        Tags.of(self.flask_app_lambda).add("project", PROJECT_TAG)
+        Tags.of(self.discord_interaction_handler).add("project", PROJECT_TAG)
         self.add_iam_lambda_invoke(target_lambda=self.discord_interaction_handler)
 
         self.server_start = self.create_server_control_lambda(
@@ -251,7 +251,7 @@ class ValheimServerStack(cdk.Stack):
         self.apigateway.root.add_method("ANY")
         self.discord_interaction_webhook = self.apigateway.root.add_resource("discord")
         self.discord_interaction_webhook_integration = apigw.LambdaIntegration(
-            self.flask_app_lambda, request_templates=request_templates
+            self.discord_interaction_handler, request_templates=request_templates
         )
         self.discord_interaction_webhook.add_method(
             "POST", self.discord_interaction_webhook_integration
@@ -312,7 +312,7 @@ class ValheimServerStack(cdk.Stack):
 
         TODO: These permissions are overly broad.
         """
-        target_lambda.add_managed_policy(
+        target_lambda.role.add_managed_policy(
             iam.ManagedPolicy.from_managed_policy_arn(
                 self,
                 "ECS_FullAccessPolicy",
@@ -361,7 +361,11 @@ class ValheimServerStack(cdk.Stack):
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 actions=["lambda:InvokeFunction"],
-                resources=["arn:aws:lambda:::function:valheim*"],
+                resources=[
+                    "arn:aws:lambda:us-west-2:399585304222:function:valheim-start",
+                    "arn:aws:lambda:us-west-2:399585304222:function:valheim-status",
+                    "arn:aws:lambda:us-west-2:399585304222:function:valheim-stop",
+                ],
                 conditions={
                     "StringEquals": {
                         "aws:ResourceTag/project": PROJECT_TAG,
@@ -423,7 +427,7 @@ class ValheimServerStack(cdk.Stack):
         )
         event_rule = events.Rule(
             self,
-            f"{target_lambda.id}EventRule",
+            f"{target_lambda.node.id}EventRule",
             event_pattern=event_pattern,
         )
         event_rule.add_target(

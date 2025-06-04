@@ -1,5 +1,6 @@
-import os
+import json
 import logging
+import os
 
 import awsgi
 import boto3
@@ -56,9 +57,9 @@ def index():
         }
 
         aws_lambda.invoke(
-            function_name=f"valheim-{interaction_option}",
-            invocation_type="Event",
-            payload=payload,
+            FunctionName=f"valheim-{interaction_option}",
+            InvocationType="Event",
+            Payload=json.dumps(payload),
         )
 
         response = {
