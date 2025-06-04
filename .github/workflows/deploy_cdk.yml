@@ -48,7 +48,7 @@ jobs:
          
     - name: Install Lambda dependencies
       run: |
-        pip install -r lambda/functions/interactions/requirements.txt -t layers/python
+        pip install -r lambda/functions/requirements.txt -t layers/python
         
     - name: Zip Lambda dependencies
       run: |

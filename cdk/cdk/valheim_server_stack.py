@@ -189,7 +189,7 @@ class ValheimServerStack(cdk.Stack):
             "ECS_CLUSTER_ARN": self.fargate_service.cluster.cluster_arn,
         }
 
-        self.flask_lambda_layer = _lambda.LayerVersion(
+        lambda_layer = _lambda.LayerVersion(
             self,
             "FlaskAppLambdaLayer",
             code=_lambda.AssetCode("../lambda-requirements.zip"),
@@ -198,35 +198,28 @@ class ValheimServerStack(cdk.Stack):
             ],
         )
 
-        self.discord_interaction_handler = _lambda.Function(
-            self,
-            "FlaskAppLambda",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            code=_lambda.AssetCode("../lambda/functions/interactions"),
-            function_name="discord-interaction-handler",
-            handler="discord_handler.handler",
-            layers=[self.flask_lambda_layer],
-            timeout=cdk.Duration.seconds(5),
-            environment={**self.env_vars},
+        self.discord_interaction_handler = self.create_lambda(
+            name="discord", environment=self.env_vars, layers=[lambda_layer]
         )
+
         Tags.of(self.discord_interaction_handler).add("project", PROJECT_TAG)
         self.add_iam_lambda_invoke(target_lambda=self.discord_interaction_handler)
 
-        self.server_start = self.create_server_control_lambda(
-            name="start", environment=self.env_vars
+        self.server_start = self.create_lambda(
+            name="start", environment=self.env_vars, layers=[lambda_layer]
         )
         Tags.of(self.server_start).add("project", PROJECT_TAG)
         self.add_iam_ecs(target_lambda=self.server_start)
         self.add_iam_ec2(target_lambda=self.server_start)
 
-        self.server_status = self.create_server_control_lambda(
-            name="status", environment=self.env_vars
+        self.server_status = self.create_lambda(
+            name="status", environment=self.env_vars, layers=[lambda_layer]
         )
         Tags.of(self.server_status).add("project", PROJECT_TAG)
         self.add_iam_ec2(target_lambda=self.server_status)
 
-        self.server_stop = self.create_server_control_lambda(
-            name="stop", environment=self.env_vars
+        self.server_stop = self.create_lambda(
+            name="stop", environment=self.env_vars, layers=[lambda_layer]
         )
         Tags.of(self.server_stop).add("project", PROJECT_TAG)
         self.add_iam_ec2(target_lambda=self.server_stop)
@@ -258,14 +251,8 @@ class ValheimServerStack(cdk.Stack):
         )
 
         # Lambda to update Route 53 DNS
-        self.dns_lambda = _lambda.Function(
-            self,
-            "DNSLambda",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            code=_lambda.AssetCode("../lambda/functions/dns"),
-            function_name="upsert-fargate-task-dns",
-            handler="update_dns.handler",
-            timeout=cdk.Duration.seconds(60),
+        self.dns_lambda = self.create_lambda(
+            name="updatedns", environment=self.env_vars, layers=[]
         )
         self.add_iam_ecs_list_tags(
             target_lambda=self.dns_lambda,
@@ -286,21 +273,14 @@ class ValheimServerStack(cdk.Stack):
         )
 
         # Lambda to stop NAT after the Fargate cluster scales down
-        self.stop_nat_lambda = _lambda.Function(
-            self,
-            "StopNATLambda",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            code=_lambda.AssetCode("../lambda/functions/nat"),
-            function_name="stop-vpc-nat",
-            handler="stop_nat.handler",
-            timeout=cdk.Duration.seconds(60),
+        self.stop_nat_lambda = self.create_lambda(
+            name="stopnat", environment=self.env_vars, layers=[]
         )
         self.add_iam_ecs_list_tags(
             target_lambda=self.stop_nat_lambda,
             cluster_arn=self.fargate_service.cluster.cluster_arn,
         )
         self.add_iam_ec2(target_lambda=self.stop_nat_lambda)
-
         self.subscribe_event_bridge_ecs_task_change(
             target_lambda=self.stop_nat_lambda,
             desired_status="STOPPED",
@@ -402,7 +382,9 @@ class ValheimServerStack(cdk.Stack):
             )
         )
 
-    def create_server_control_lambda(self, name: str, environment: dict):
+    def create_lambda(
+        self, name: str, environment: dict, layers: list[_lambda.LayerVersion]
+    ):
         return _lambda.Function(
             self,
             f"{BASENAME}{name.capitalize()}Lambda",
@@ -410,8 +392,8 @@ class ValheimServerStack(cdk.Stack):
             code=_lambda.AssetCode(f"../lambda/functions/{name}"),
             function_name=f"{BASENAME.lower()}-{name}",
             handler=f"{name}.handler",
-            layers=[],
-            timeout=cdk.Duration.seconds(60),
+            layers=layers,
+            timeout=cdk.Duration.seconds(30),
             environment=environment,
         )
 
