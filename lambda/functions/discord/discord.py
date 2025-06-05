@@ -62,16 +62,19 @@ def index():
             Payload=json.dumps(payload),
         )
 
-        response = {
-            "type": 4,  # Respond with message
-            "data": {
-                "tts": False,
-                "content": "",
-                "embeds": [],
-                "allowed_mentions": {"parse": []},
-            },
-        }
-        return jsonify(response)
+        # Type 4 with data content will return a message. Type 5 shows a thinking
+        # spinner and does not mark the message as edited when a response is async
+        # patched.
+        # response = {
+        #     "type": 4,  # Respond with message
+        #     "data": {
+        #         "tts": False,
+        #         "content": "",
+        #         "embeds": [],
+        #         "allowed_mentions": {"parse": []},
+        #     },
+        # }
+        return jsonify({"type": 5})
 
 
 def handler(event, context):

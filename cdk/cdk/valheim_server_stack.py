@@ -229,6 +229,7 @@ class ValheimServerStack(cdk.Stack):
         )
         Tags.of(self.server_stop).add("project", PROJECT_TAG)
         self.add_iam_ec2(target_lambda=self.server_stop)
+        self.add_iam_ecs(target_lambda=self.server_stop)
 
         # https://slmkitani.medium.com/passing-custom-headers-through-amazon-api-gateway-to-an-aws-lambda-function-f3a1cfdc0e29
         request_templates = {
@@ -303,7 +304,7 @@ class ValheimServerStack(cdk.Stack):
         target_lambda.role.add_managed_policy(
             iam.ManagedPolicy.from_managed_policy_arn(
                 self,
-                "ECS_FullAccessPolicy",
+                f"ECS_FullAccessPolicy_{target_lambda.function_name}",
                 managed_policy_arn="arn:aws:iam::aws:policy/AmazonECS_FullAccess",
             )
         )
