@@ -417,6 +417,11 @@ class ValheimServerStack(cdk.Stack):
     def create_lambda(
         self, name: str, environment: dict, layers: list[_lambda.LayerVersion]
     ):
+        log_group = logs.LogGroup(
+            log_group_name=name,
+            retention=logs.RetentionDays.ONE_WEEK,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
         return _lambda.Function(
             self,
             f"{BASENAME}{name.capitalize()}Lambda",
@@ -426,6 +431,7 @@ class ValheimServerStack(cdk.Stack):
             handler=f"{name}.handler",
             layers=layers,
             timeout=cdk.Duration.seconds(30),
+            log_group=log_group,
             environment=environment,
         )
 
