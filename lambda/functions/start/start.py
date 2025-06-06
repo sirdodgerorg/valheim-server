@@ -1,7 +1,8 @@
+import json
 import logging
+import os
 
 import boto3
-import requests
 
 
 logger = logging.getLogger()
@@ -9,6 +10,7 @@ logger.setLevel(logging.INFO)
 
 ec2 = boto3.client("ec2")
 ecs = boto3.client("ecs")
+sqs = boto3.client("sqs")
 
 
 def get_nat_instance(stack_name: str):
@@ -43,11 +45,23 @@ def handler(event, context):
         desiredCount=1,
     )
 
-    resp = requests.patch(
-        f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original",
-        data={
-            "content": "Starting the server",
-        },
+    # Enqueue message to SQS to allow follow-up message
+    sqs.send_message(
+        QueueUrl=os.environ.get("SQS_SERVER_START_URL"),
+        MessageBody=json.dumps(
+            {
+                "application_id": event["application_id"],
+                "token": event["token"],
+            }
+        ),
     )
-    logger.info(f"Discord response ({resp.status_code}): {resp.json()}")
+
+    # Defer response until after server is ready
+    # resp = requests.patch(
+    #     f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original",
+    #     data={
+    #         "content": "Starting the server",
+    #     },
+    # )
+    # logger.info(f"Discord response ({resp.status_code}): {resp.json()}")
     return {"statusCode": 200}

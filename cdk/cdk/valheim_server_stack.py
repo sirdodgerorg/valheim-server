@@ -13,6 +13,8 @@ from aws_cdk import (
     aws_iam as iam,
     aws_lambda as _lambda,
     aws_logs as logs,
+    aws_logs_destinations as logs_destinations,
+    aws_sqs as sqs,
     Tags,
 )
 
@@ -111,12 +113,19 @@ class ValheimServerStack(cdk.Stack):
             task_role=iam_task_role,
         )
 
+        self.container_log_group = logs.LogGroup(
+            self,
+            f"{BASENAME}ContainerLogGroup",
+            log_group_name=f"/aws/ecs/{BASENAME.lower()}-container",
+            retention=logs.RetentionDays.ONE_WEEK,
+        )
+
         self.container = self.fargate_task.add_container(
             f"{BASENAME}Container",
             image=ecs.ContainerImage.from_registry("lloesche/valheim-server"),
             logging=ecs.AwsLogDriver(
                 stream_prefix=BASENAME.lower(),
-                log_retention=logs.RetentionDays.ONE_WEEK,
+                log_group=self.container_log_group,
             ),
             environment={
                 "SERVER_NAME": os.environ.get("SERVER_NAME", "ServerName"),
@@ -182,11 +191,20 @@ class ValheimServerStack(cdk.Stack):
             )
         )
 
+        # Queues for events between lambdas
+        self.server_start_queue = sqs.Queue(
+            self,
+            f"{BASENAME}ServerStartQueue",
+            retention_period=cdk.Duration.minutes(15),
+        )
+        Tags.of(self.server_start_queue).add("project", PROJECT_TAG)
+
         # Environment for Discord -> Lambda interaction controls
         self.env_vars = {
             "APPLICATION_PUBLIC_KEY": os.environ.get("APPLICATION_PUBLIC_KEY"),
             "ECS_SERVICE_NAME": self.fargate_service.service_name,
             "ECS_CLUSTER_ARN": self.fargate_service.cluster.cluster_arn,
+            "SQS_SERVER_START_URL": self.server_start_queue.queue_url,
         }
 
         lambda_layer = _lambda.LayerVersion(
@@ -198,38 +216,59 @@ class ValheimServerStack(cdk.Stack):
             ],
         )
 
-        self.discord_interaction_handler = self.create_lambda(
+        self.lambda_discord = self.create_lambda(
             name="discord", environment=self.env_vars, layers=[lambda_layer]
         )
 
-        Tags.of(self.discord_interaction_handler).add("project", PROJECT_TAG)
-        self.add_iam_lambda_invoke(target_lambda=self.discord_interaction_handler)
+        Tags.of(self.lambda_discord).add("project", PROJECT_TAG)
+        self.add_iam_lambda_invoke(target_lambda=self.lambda_discord)
 
         self.server_start = self.create_lambda(
             name="start", environment=self.env_vars, layers=[lambda_layer]
         )
         Tags.of(self.server_start).add("project", PROJECT_TAG)
+
         self.add_iam_ecs(target_lambda=self.server_start)
         self.add_iam_ec2(target_lambda=self.server_start)
         self.add_iam_ec2_describe(target_lambda=self.server_start)
+        self.add_iam_sqs(
+            target_lambda=self.server_start, target_queue=self.server_start_queue
+        )
 
-        self.server_status = self.create_lambda(
+        self.lambda_startmsg = self.create_lambda(
+            name="startmsg", environment=self.env_vars, layers=[lambda_layer]
+        )
+        self.add_iam_sqs(
+            target_lambda=self.lambda_startmsg,
+            target_queue=self.server_start_queue,
+        )
+        self.server_start_subscription_filter = logs.SubscriptionFilter(
+            self,
+            f"{BASENAME}LogSubscriptionFilter",
+            log_group=self.container_log_group,
+            destination=logs_destinations.LambdaDestination(self.lambda_startmsg),
+            filter_pattern=logs.FilterPattern.literal(
+                "%.*valheim-updater\svalheim-server\:\sstarted%"
+            ),
+        )
+
+        self.lambda_status = self.create_lambda(
             name="status", environment=self.env_vars, layers=[lambda_layer]
         )
-        Tags.of(self.server_status).add("project", PROJECT_TAG)
-        self.add_iam_ec2(target_lambda=self.server_status)
-        self.add_iam_ec2_describe(target_lambda=self.server_status)
+        Tags.of(self.lambda_status).add("project", PROJECT_TAG)
+        self.add_iam_ec2(target_lambda=self.lambda_status)
+        self.add_iam_ec2_describe(target_lambda=self.lambda_status)
         self.add_iam_ecs_describe_services(
-            target_lambda=self.server_status,
+            target_lambda=self.lambda_status,
             service_arn=self.fargate_service.service_arn,
         )
 
-        self.server_stop = self.create_lambda(
+        self.lambda_stop = self.create_lambda(
             name="stop", environment=self.env_vars, layers=[lambda_layer]
         )
-        Tags.of(self.server_stop).add("project", PROJECT_TAG)
-        self.add_iam_ec2(target_lambda=self.server_stop)
-        self.add_iam_ecs(target_lambda=self.server_stop)
+        Tags.of(self.lambda_stop).add("project", PROJECT_TAG)
+        self.add_iam_ec2(target_lambda=self.lambda_stop)
+        self.add_iam_ecs(target_lambda=self.lambda_stop)
 
         # https://slmkitani.medium.com/passing-custom-headers-through-amazon-api-gateway-to-an-aws-lambda-function-f3a1cfdc0e29
         request_templates = {
@@ -251,22 +290,22 @@ class ValheimServerStack(cdk.Stack):
         self.apigateway.root.add_method("ANY")
         self.discord_interaction_webhook = self.apigateway.root.add_resource("discord")
         self.discord_interaction_webhook_integration = apigw.LambdaIntegration(
-            self.discord_interaction_handler, request_templates=request_templates
+            self.lambda_discord, request_templates=request_templates
         )
         self.discord_interaction_webhook.add_method(
             "POST", self.discord_interaction_webhook_integration
         )
 
         # Lambda to update Route 53 DNS
-        self.dns_lambda = self.create_lambda(
+        self.lambda_updatedns = self.create_lambda(
             name="updatedns", environment=self.env_vars, layers=[]
         )
         self.add_iam_ecs_list_tags(
-            target_lambda=self.dns_lambda,
+            target_lambda=self.lambda_updatedns,
             cluster_arn=self.fargate_service.cluster.cluster_arn,
         )
         self.add_iam_route53_update(
-            target_lambda=self.dns_lambda, hosted_zone_id=hosted_zone_id
+            target_lambda=self.lambda_updatedns, hosted_zone_id=hosted_zone_id
         )
 
         # The state change from RUNNING -> RUNNING seems to be the best since
@@ -274,24 +313,24 @@ class ValheimServerStack(cdk.Stack):
         # the narrowest filter.
         # https://medium.com/@andreas.pasch/automatic-public-dns-for-fargate-managed-containers-in-amazon-ecs-f0ca0a0334b5
         self.subscribe_event_bridge_ecs_task_change(
-            target_lambda=self.dns_lambda,
+            target_lambda=self.lambda_updatedns,
             desired_status="RUNNING",
             last_status="RUNNING",
         )
 
         # Lambda to stop NAT after the Fargate cluster scales down
-        self.stop_nat_lambda = self.create_lambda(
+        self.lambda_stopnat = self.create_lambda(
             name="stopnat", environment=self.env_vars, layers=[]
         )
         self.add_iam_ecs_list_tags(
-            target_lambda=self.stop_nat_lambda,
+            target_lambda=self.lambda_stopnat,
             cluster_arn=self.fargate_service.cluster.cluster_arn,
         )
-        self.add_iam_ec2(target_lambda=self.stop_nat_lambda)
-        self.add_iam_ec2_describe(target_lambda=self.stop_nat_lambda)
+        self.add_iam_ec2(target_lambda=self.lambda_stopnat)
+        self.add_iam_ec2_describe(target_lambda=self.lambda_stopnat)
 
         self.subscribe_event_bridge_ecs_task_change(
-            target_lambda=self.stop_nat_lambda,
+            target_lambda=self.lambda_stopnat,
             desired_status="STOPPED",
             last_status="RUNNING",
         )
@@ -414,11 +453,27 @@ class ValheimServerStack(cdk.Stack):
             )
         )
 
+    def add_iam_sqs(self, target_lambda: _lambda.Function, target_queue: sqs.Queue):
+        """Permission to enqueue and read SQS messages."""
+
+        target_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "sqs:SendMessage",
+                    "sqs:ReceiveMessage",
+                ],
+                resources=[target_queue.queue_arn],
+            )
+        )
+
     def create_lambda(
         self, name: str, environment: dict, layers: list[_lambda.LayerVersion]
     ):
         log_group = logs.LogGroup(
-            log_group_name=name,
+            self,
+            f"Lambda{name.capitalize()}LogGroup",
+            log_group_name=f"/aws/lambda/{BASENAME.lower()}-{name}",
             retention=logs.RetentionDays.ONE_WEEK,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
