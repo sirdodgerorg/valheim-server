@@ -1,4 +1,5 @@
 import logging
+import os
 
 import boto3
 import requests
@@ -12,13 +13,8 @@ ecs = boto3.client("ecs")
 
 def handler(event, context):
     logger.info(f"Received event: {event}")
-
-    # Scale down Fargate server
-    resp = ecs.update_service(
-        cluster=event["ecs_cluster_arn"],
-        service=event["ecs_service_name"],
-        desiredCount=0,
-    )
+    server = boto3.resource("ec2").Instance(os.environ.get("SERVER_INSTANCE_ID"))
+    server.stop()
 
     resp = requests.patch(
         f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original",
