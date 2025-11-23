@@ -50,10 +50,6 @@ def index():
             # Pass Discord application_id and token to edit the response from other lambdas
             "application_id": request_json["application_id"],
             "token": request_json["token"],
-            # Pass environmental info identifying resources to query/modify
-            "ecs_cluster_arn": os.environ.get("ECS_CLUSTER_ARN", ""),
-            "ecs_service_name": os.environ.get("ECS_SERVICE_NAME", ""),
-            "nat_name": "ValheimServerStack/ValheimVPC/PublicSubnet1/NatInstance",
         }
 
         aws_lambda.invoke(
