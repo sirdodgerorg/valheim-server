@@ -130,6 +130,15 @@ class ValheimServerStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # CloudWatch Log Group for application logs, second server
+        self.log_group_valheim_latenight = logs.LogGroup(
+            self,
+            f"{BASENAME}LateNightLogGroup",
+            log_group_name=f"/aws/ec2/{BASENAME.lower()}-latenight",
+            retention=logs.RetentionDays.ONE_WEEK,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
         # CloudWatch Log Group for syslog
         self.log_group_syslog = logs.LogGroup(
             self,
