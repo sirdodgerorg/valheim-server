@@ -139,8 +139,6 @@ class ValheimServerStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
-        self.add_iam_cloudwatch(target_instance=self.ec2_server)
-
         # Allow connections for Valheim on UDP ports 2456-2458
         self.ec2_server.connections.allow_from(
             ec2.Peer.any_ipv4(), ec2.Port.udp_range(2456, 2458)
@@ -220,9 +218,7 @@ class ValheimServerStack(cdk.Stack):
             f"{BASENAME}LogSubscriptionFilter",
             log_group=self.log_group,
             destination=logs_destinations.LambdaDestination(self.lambda_startmsg),
-            filter_pattern=logs.FilterPattern.literal(
-                r"%.*supervisord: valheim .*: Game server connected%"
-            ),
+            filter_pattern=logs.FilterPattern.literal(r"%.*Opened Steam server%"),
         )
 
         self.lambda_status = self.create_lambda(
@@ -278,21 +274,6 @@ class ValheimServerStack(cdk.Stack):
             target_lambda=self.lambda_updatedns,
             instance_arn=ec2_server_arn,
             state="running",
-        )
-
-    def add_iam_cloudwatch(self, target_instance: ec2.Instance):
-        """Permission for EC2 to write to logs"""
-        target_instance.add_to_role_policy(
-            iam.PolicyStatement(
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                    "logs:DescribeLogStreams",
-                ],
-                resources=["*"],
-            )
         )
 
     def add_iam_ec2(self, target_lambda: _lambda.Function, instance_arn: str):
