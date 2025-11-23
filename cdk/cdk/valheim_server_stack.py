@@ -143,6 +143,10 @@ class ValheimServerStack(cdk.Stack):
         self.ec2_server.connections.allow_from(
             ec2.Peer.any_ipv4(), ec2.Port.udp_range(2456, 2458)
         )
+        # Allow connections for Valheim on UDP ports 2459-2461 for second server
+        self.ec2_server.connections.allow_from(
+            ec2.Peer.any_ipv4(), ec2.Port.udp_range(2459, 2461)
+        )
         # Allow connections for SSH
         self.ec2_server.connections.allow_from(ec2.Peer.any_ipv4(), ec2.Port.tcp(22))
 
