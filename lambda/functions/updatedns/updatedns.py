@@ -48,10 +48,10 @@ def upsert_route53_recordset(hosted_zone_id: str, domain: str, public_ip: str) -
 
 def handler(event, context):
     logger.info("Received event: %s", event)
-    instance_id = os.environ.get("SERVER_INSTANCE_ID")
+    instance_id = event.get("instance_id") or os.environ.get("SERVER_INSTANCE_ID")
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     try:
-        public_ip = desc['Reservations'][0]['Instances'][0]['PublicIpAddress']
+        public_ip = desc["Reservations"][0]["Instances"][0]["PublicIpAddress"]
     except (KeyError, IndexError) as ex:
         logger.error("Could not get IP address: %s", ex)
         raise

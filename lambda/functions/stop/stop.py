@@ -13,7 +13,9 @@ ecs = boto3.client("ecs")
 
 def handler(event, context):
     logger.info(f"Received event: {event}")
-    server = boto3.resource("ec2").Instance(os.environ.get("SERVER_INSTANCE_ID"))
+    instance_id = event.get("instance_id") or os.environ.get("SERVER_INSTANCE_ID")
+
+    server = boto3.resource("ec2").Instance(instance_id)
     server.stop()
 
     resp = requests.patch(
