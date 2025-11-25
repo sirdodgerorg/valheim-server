@@ -348,12 +348,25 @@ class GameServersStack(cdk.Stack):
         self.apigateway = apigw.RestApi(self, "FlaskAppEndpoint")
         Tags.of(self.apigateway).add(PROJECT_TAG_KEY, TAG_SERVERS)
         self.apigateway.root.add_method("ANY")
-        self.discord_interaction_webhook = self.apigateway.root.add_resource("discord")
-        self.discord_interaction_webhook_integration = apigw.LambdaIntegration(
+
+        self.discord_interaction_webhook_valheim = self.apigateway.root.add_resource(
+            "valheim"
+        )
+        self.discord_interaction_webhook_integration_valheim = apigw.LambdaIntegration(
             self.lambda_discord, request_templates=request_templates
         )
-        self.discord_interaction_webhook.add_method(
-            "POST", self.discord_interaction_webhook_integration
+        self.discord_interaction_webhook_valheim.add_method(
+            "POST", self.discord_interaction_webhook_integration_valheim
+        )
+
+        self.discord_interaction_webhook_moria = self.apigateway.root.add_resource(
+            "moria"
+        )
+        self.discord_interaction_webhook_integration_moria = apigw.LambdaIntegration(
+            self.lambda_discord, request_templates=request_templates
+        )
+        self.discord_interaction_webhook_moria.add_method(
+            "POST", self.discord_interaction_webhook_integration_moria
         )
 
         # Lambda to update Route 53 DNS
