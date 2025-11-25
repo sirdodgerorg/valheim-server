@@ -1,6 +1,6 @@
-# Valheim AWS CDK Server
+# AWS CDK for game servers
 
-Run a dedicated Valheim server (using the [lloesche/valheim-server](https://github.com/lloesche/valheim-server-docker) image) and set up a Discord slash-command handler to start and stop it.
+Run dedicated game servers and set up Discord slash-command handlers to start and stop them.
 
 Borrows heavily from:
 * Brian Caffey's [valheim-cdk-discord-interactions](https://gitlab.com/briancaffey/valheim-cdk-discord-interactions)

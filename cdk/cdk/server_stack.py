@@ -19,12 +19,21 @@ from aws_cdk import (
 )
 
 
+# Note that many of the original resources will be named for the original
+# Valheim server even though they are shared. If we ever do a full destroy,
+# opportunistically change this to "Servers"
 BASENAME = "Valheim"
 PROJECT_TAG_KEY = "project"
-PROJECT_TAG = "valheim"
+
+ROUTE53_DOMAIN_BASE = os.environ.get("ROUTE53_DOMAIN_BASE")
+ROUTE53_ZONE_ID = os.environ.get("ROUTE53_HOSTED_ZONE_ID")
+
+TAG_MORIA = "moria"
+TAG_SERVERS = "servers"
+TAG_VALHEIM = "valheim"
 
 
-class ValheimServerStack(cdk.Stack):
+class GameServersStack(cdk.Stack):
 
     def __init__(self, scope, construct_id, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -44,21 +53,63 @@ class ValheimServerStack(cdk.Stack):
                 ),
             ],
         )
-        Tags.of(self.vpc).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.vpc).add(PROJECT_TAG_KEY, TAG_SERVERS)
 
         # EC2 Key Pair
         self.keypair = ec2.KeyPair(
             self,
-            f"{BASENAME}ServerKeyPair",
+            f"{BASENAME}ServerKeyPair",  # Named Valheim but serves both
             format=ec2.KeyPairFormat.PPK,
-            key_pair_name=f"{BASENAME}Server",
+            key_pair_name=f"{BASENAME}Server",  # Named Valheim but serves both
         )
-        Tags.of(self.keypair).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.keypair).add(PROJECT_TAG_KEY, TAG_VALHEIM)  # Old tag name
 
-        # EC2 Server Instance
-        self.ec2_server = ec2.Instance(
+        ##################################################
+        # Shared storage for all servers
+        ##################################################
+
+        # EFS filesystem for world storage
+        self.efs = efs.FileSystem(
             self,
-            f"{BASENAME}Server",
+            f"{BASENAME}Filesystem",  # Named Valheim but serves both
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+            encrypted=False,
+            lifecycle_policy=efs.LifecyclePolicy.AFTER_14_DAYS,
+        )
+        Tags.of(self.efs).add(PROJECT_TAG_KEY, TAG_VALHEIM)  # Old tag name
+
+        # Volume for EFS
+        self.volume = ecs.Volume(
+            name=f"{BASENAME}SaveData",
+            efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                file_system_id=self.efs.file_system_id,
+            ),
+        )
+
+        # Backups
+        # Back up the EFS volume every hour, retain for 3 days
+        self.backup = backup.BackupPlan(self, f"{BASENAME}BackupPlan")
+        Tags.of(self.backup).add(PROJECT_TAG_KEY, TAG_VALHEIM)
+        self.backup.add_selection(
+            f"{BASENAME}BackupSelection",
+            resources=[backup.BackupResource.from_efs_file_system(self.efs)],
+        )
+        self.backup.add_rule(
+            backup.BackupPlanRule(
+                schedule_expression=events.Schedule.cron(minute="0"),
+                delete_after=cdk.Duration.days(3),
+            )
+        )
+
+        ##################################################
+        # Valheim server
+        ##################################################
+
+        # EC2 Server Instance - Valheim
+        self.ec2_valheim = ec2.Instance(
+            self,
+            f"ValheimServer",
             instance_type=ec2.InstanceType.of(
                 instance_class=ec2.InstanceClass.T3A,
                 instance_size=ec2.InstanceSize.MEDIUM,
@@ -72,108 +123,137 @@ class ValheimServerStack(cdk.Stack):
             vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
-        Tags.of(self.ec2_server).add(PROJECT_TAG_KEY, PROJECT_TAG)
-        hosted_zone_id = os.environ.get("ROUTE53_HOSTED_ZONE_ID")
-        Tags.of(self.ec2_server).add("ROUTE53_HOSTED_ZONE_ID", hosted_zone_id)
-        Tags.of(self.ec2_server).add("ROUTE53_DOMAIN", os.environ.get("ROUTE53_DOMAIN"))
+        Tags.of(self.ec2_valheim).add(PROJECT_TAG_KEY, TAG_VALHEIM)
+        Tags.of(self.ec2_valheim).add("ROUTE53_HOSTED_ZONE_ID", ROUTE53_ZONE_ID)
+        Tags.of(self.ec2_valheim).add("ROUTE53_DOMAIN", f"valheim{ROUTE53_DOMAIN_BASE}")
 
         # Add Cloudwatch logging roles
-        self.ec2_server.role.add_managed_policy(
+        self.ec2_valheim.role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "CloudWatchAgentServerPolicy"
             )
         )
-        self.ec2_server.role.add_managed_policy(
+        self.ec2_valheim.role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name(
                 "AmazonSSMManagedInstanceCore"
             )
         )
 
         # Construct the ARN for use in IAM policies, etc.
-        ec2_server_arn = cdk.Stack.format_arn(
+        ec2_valheim_arn = cdk.Stack.format_arn(
             self,
             partition="aws",
             service="ec2",
             region=self.region,
             account=self.account,
             resource="instance",
-            resource_name=self.ec2_server.instance_id,
+            resource_name=self.ec2_valheim.instance_id,
             arn_format=cdk.ArnFormat.SLASH_RESOURCE_NAME,
         )
 
-        # EFS filesystem for world storage
-        self.efs = efs.FileSystem(
-            self,
-            f"{BASENAME}Filesystem",
-            vpc=self.vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
-            encrypted=False,
-            lifecycle_policy=efs.LifecyclePolicy.AFTER_14_DAYS,
-        )
-        Tags.of(self.efs).add(PROJECT_TAG_KEY, PROJECT_TAG)
-        self.efs.connections.allow_default_port_from(self.ec2_server)
-
-        # Volume for EFS
-        self.volume = ecs.Volume(
-            name=f"{BASENAME}SaveData",
-            efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                file_system_id=self.efs.file_system_id,
-            ),
-        )
-
         # CloudWatch Log Group for application logs
-        self.log_group = logs.LogGroup(
+        self.log_group_valheim = logs.LogGroup(
             self,
-            f"{BASENAME}LogGroup",
-            log_group_name=f"/aws/ec2/{BASENAME.lower()}",
-            retention=logs.RetentionDays.ONE_WEEK,
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-        )
-
-        # CloudWatch Log Group for application logs, second server
-        self.log_group_valheim_latenight = logs.LogGroup(
-            self,
-            f"{BASENAME}LateNightLogGroup",
-            log_group_name=f"/aws/ec2/{BASENAME.lower()}-latenight",
+            f"ValheimLogGroup",
+            log_group_name=f"/aws/ec2/valheim",
             retention=logs.RetentionDays.ONE_WEEK,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
         # CloudWatch Log Group for syslog
-        self.log_group_syslog = logs.LogGroup(
+        self.log_group_valheim_syslog = logs.LogGroup(
             self,
-            f"{BASENAME}SyslogLogGroup",
-            log_group_name=f"/aws/ec2/{BASENAME.lower()}-syslog",
+            f"ValheimSyslogLogGroup",
+            log_group_name=f"/aws/ec2/valheim-syslog",
             retention=logs.RetentionDays.ONE_WEEK,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
         # Allow connections for Valheim on UDP ports 2456-2458
-        self.ec2_server.connections.allow_from(
+        self.ec2_valheim.connections.allow_from(
             ec2.Peer.any_ipv4(), ec2.Port.udp_range(2456, 2458)
         )
-        # Allow connections for Valheim on UDP ports 2459-2461 for second server
-        self.ec2_server.connections.allow_from(
-            ec2.Peer.any_ipv4(), ec2.Port.udp_range(2459, 2461)
-        )
-        # Allow connections for SSH
-        self.ec2_server.connections.allow_from(ec2.Peer.any_ipv4(), ec2.Port.tcp(22))
 
-        # Backups
+        self.efs.connections.allow_default_port_from(self.ec2_valheim)
 
-        # Back up the EFS volume every hour, retain for 3 days
-        self.backup = backup.BackupPlan(self, f"{BASENAME}BackupPlan")
-        Tags.of(self.backup).add(PROJECT_TAG_KEY, PROJECT_TAG)
-        self.backup.add_selection(
-            f"{BASENAME}BackupSelection",
-            resources=[backup.BackupResource.from_efs_file_system(self.efs)],
+        ##################################################
+        # Moria server
+        ##################################################
+
+        # EC2 Server Instance - Moria
+        self.ec2_moria = ec2.Instance(
+            self,
+            f"MoriaServer",
+            instance_type=ec2.InstanceType.of(
+                instance_class=ec2.InstanceClass.T3A,
+                instance_size=ec2.InstanceSize.MEDIUM,
+            ),
+            machine_image=ec2.MachineImage.generic_linux(
+                ami_map={"us-west-2": "ami-03aa99ddf5498ceb9"}
+            ),
+            key_pair=self.keypair,
+            allow_all_outbound=True,
+            associate_public_ip_address=True,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
-        self.backup.add_rule(
-            backup.BackupPlanRule(
-                schedule_expression=events.Schedule.cron(minute="0"),
-                delete_after=cdk.Duration.days(3),
+        Tags.of(self.ec2_moria).add(PROJECT_TAG_KEY, TAG_MORIA)
+        Tags.of(self.ec2_moria).add("ROUTE53_HOSTED_ZONE_ID", ROUTE53_ZONE_ID)
+        Tags.of(self.ec2_moria).add("ROUTE53_DOMAIN", f"moria{ROUTE53_DOMAIN_BASE}")
+
+        # Add Cloudwatch logging roles
+        self.ec2_moria.role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "CloudWatchAgentServerPolicy"
             )
         )
+        self.ec2_moria.role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "AmazonSSMManagedInstanceCore"
+            )
+        )
+
+        # Construct the ARN for use in IAM policies, etc.
+        ec2_moria_arn = cdk.Stack.format_arn(
+            self,
+            partition="aws",
+            service="ec2",
+            region=self.region,
+            account=self.account,
+            resource="instance",
+            resource_name=self.ec2_moria.instance_id,
+            arn_format=cdk.ArnFormat.SLASH_RESOURCE_NAME,
+        )
+
+        # CloudWatch Log Group for application logs
+        self.log_group_moria = logs.LogGroup(
+            self,
+            f"MoriaLogGroup",
+            log_group_name=f"/aws/ec2/moria",
+            retention=logs.RetentionDays.ONE_WEEK,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        # CloudWatch Log Group for syslog
+        self.log_group_moria_syslog = logs.LogGroup(
+            self,
+            f"MoriaSyslogLogGroup",
+            log_group_name=f"/aws/ec2/moria-syslog",
+            retention=logs.RetentionDays.ONE_WEEK,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        # Allow connections for Valheim on UDP ports 7777
+        self.ec2_moria.connections.allow_from(ec2.Peer.any_ipv4(), ec2.Port.udp(7777))
+
+        self.efs.connections.allow_default_port_from(self.ec2_moria)
+
+        # Allow connections for SSH
+        self.ec2_valheim.connections.allow_from(ec2.Peer.any_ipv4(), ec2.Port.tcp(22))
+
+        ##################################################
+        # Discord control
+        ##################################################
 
         # Queues for events between lambdas
         self.server_start_queue = sqs.Queue(
@@ -181,15 +261,14 @@ class ValheimServerStack(cdk.Stack):
             f"{BASENAME}ServerStartQueue",
             retention_period=cdk.Duration.minutes(15),
         )
-        Tags.of(self.server_start_queue).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.server_start_queue).add(PROJECT_TAG_KEY, TAG_SERVERS)
 
         # Environment for Discord -> Lambda interaction controls
         self.env_vars = {
             "APPLICATION_PUBLIC_KEY": os.environ.get("APPLICATION_PUBLIC_KEY"),
-            "SERVER_INSTANCE_ID": self.ec2_server.instance_id,
+            "SERVER_INSTANCE_ID": self.ec2_valheim.instance_id,
             "SQS_SERVER_START_URL": self.server_start_queue.queue_url,
-            "ROUTE53_HOSTED_ZONE_ID": hosted_zone_id,
-            "ROUTE53_DOMAIN": os.environ.get("ROUTE53_DOMAIN"),
+            "ROUTE53_HOSTED_ZONE_ID": ROUTE53_ZONE_ID,
         }
 
         lambda_layer = _lambda.LayerVersion(
@@ -205,15 +284,17 @@ class ValheimServerStack(cdk.Stack):
             name="discord", environment=self.env_vars, layers=[lambda_layer]
         )
 
-        Tags.of(self.lambda_discord).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.lambda_discord).add(PROJECT_TAG_KEY, TAG_SERVERS)
         self.add_iam_lambda_invoke(target_lambda=self.lambda_discord)
 
         self.server_start = self.create_lambda(
             name="start", environment=self.env_vars, layers=[lambda_layer]
         )
-        Tags.of(self.server_start).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.server_start).add(PROJECT_TAG_KEY, TAG_SERVERS)
 
-        self.add_iam_ec2(target_lambda=self.server_start, instance_arn=ec2_server_arn)
+        self.add_iam_ec2(target_lambda=self.server_start, instance_arn=ec2_valheim_arn)
+        self.add_iam_ec2(target_lambda=self.server_start, instance_arn=ec2_moria_arn)
+
         self.add_iam_ec2_describe(target_lambda=self.server_start)
         self.add_iam_sqs(
             target_lambda=self.server_start, target_queue=self.server_start_queue
@@ -226,10 +307,11 @@ class ValheimServerStack(cdk.Stack):
             target_lambda=self.lambda_startmsg,
             target_queue=self.server_start_queue,
         )
-        self.server_start_subscription_filter = logs.SubscriptionFilter(
+
+        self.server_start_subscription_filter_valheim = logs.SubscriptionFilter(
             self,
             f"{BASENAME}LogSubscriptionFilter",
-            log_group=self.log_group,
+            log_group=self.log_group_valheim,
             destination=logs_destinations.LambdaDestination(self.lambda_startmsg),
             filter_pattern=logs.FilterPattern.literal(r"%.*Opened Steam server%"),
         )
@@ -237,14 +319,15 @@ class ValheimServerStack(cdk.Stack):
         self.lambda_status = self.create_lambda(
             name="status", environment=self.env_vars, layers=[lambda_layer]
         )
-        Tags.of(self.lambda_status).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.lambda_status).add(PROJECT_TAG_KEY, TAG_SERVERS)
         self.add_iam_ec2_describe(target_lambda=self.lambda_status)
 
         self.lambda_stop = self.create_lambda(
             name="stop", environment=self.env_vars, layers=[lambda_layer]
         )
-        Tags.of(self.lambda_stop).add(PROJECT_TAG_KEY, PROJECT_TAG)
-        self.add_iam_ec2(target_lambda=self.lambda_stop, instance_arn=ec2_server_arn)
+        Tags.of(self.lambda_stop).add(PROJECT_TAG_KEY, TAG_SERVERS)
+        self.add_iam_ec2(target_lambda=self.lambda_stop, instance_arn=ec2_valheim_arn)
+        self.add_iam_ec2(target_lambda=self.lambda_stop, instance_arn=ec2_moria_arn)
         self.add_iam_ec2_describe(target_lambda=self.lambda_stop)
 
         # https://slmkitani.medium.com/passing-custom-headers-through-amazon-api-gateway-to-an-aws-lambda-function-f3a1cfdc0e29
@@ -263,7 +346,7 @@ class ValheimServerStack(cdk.Stack):
         }
 
         self.apigateway = apigw.RestApi(self, "FlaskAppEndpoint")
-        Tags.of(self.apigateway).add(PROJECT_TAG_KEY, PROJECT_TAG)
+        Tags.of(self.apigateway).add(PROJECT_TAG_KEY, TAG_SERVERS)
         self.apigateway.root.add_method("ANY")
         self.discord_interaction_webhook = self.apigateway.root.add_resource("discord")
         self.discord_interaction_webhook_integration = apigw.LambdaIntegration(
@@ -279,13 +362,20 @@ class ValheimServerStack(cdk.Stack):
         )
         self.add_iam_ec2_describe(target_lambda=self.lambda_updatedns)
         self.add_iam_route53_update(
-            target_lambda=self.lambda_updatedns, hosted_zone_id=hosted_zone_id
+            target_lambda=self.lambda_updatedns, hosted_zone_id=ROUTE53_ZONE_ID
         )
 
         # Subscribe to running state change to update dns
         self.subscribe_event_bridge_ec2_state_change(
+            name="Valheim",
             target_lambda=self.lambda_updatedns,
-            instance_arn=ec2_server_arn,
+            instance_arn=ec2_valheim_arn,
+            state="running",
+        )
+        self.subscribe_event_bridge_ec2_state_change(
+            name="Moria",
+            target_lambda=self.lambda_updatedns,
+            instance_arn=ec2_moria_arn,
             state="running",
         )
 
@@ -322,7 +412,7 @@ class ValheimServerStack(cdk.Stack):
                 ],
                 conditions={
                     "StringEquals": {
-                        "aws:ResourceTag/project": PROJECT_TAG,
+                        "aws:ResourceTag/project": TAG_VALHEIM,
                     },
                 },
             )
@@ -375,17 +465,17 @@ class ValheimServerStack(cdk.Stack):
     ):
         log_group = logs.LogGroup(
             self,
-            f"Lambda{name.capitalize()}LogGroup",
-            log_group_name=f"/aws/lambda/{BASENAME.lower()}-{name}",
+            f"LambdaServers{name.capitalize()}LogGroup",
+            log_group_name=f"/aws/lambda/servers-{name}",
             retention=logs.RetentionDays.ONE_WEEK,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
         return _lambda.Function(
             self,
-            f"{BASENAME}{name.capitalize()}Lambda",
+            f"Servers{name.capitalize()}Lambda",
             runtime=_lambda.Runtime.PYTHON_3_12,
             code=_lambda.AssetCode(f"../lambda/functions/{name}"),
-            function_name=f"{BASENAME.lower()}-{name}",
+            function_name=f"servers-{name}",
             handler=f"{name}.handler",
             layers=layers,
             timeout=cdk.Duration.seconds(30),
@@ -394,7 +484,7 @@ class ValheimServerStack(cdk.Stack):
         )
 
     def subscribe_event_bridge_ec2_state_change(
-        self, target_lambda: _lambda.Function, instance_arn: str, state: str
+        self, name: str, target_lambda: _lambda.Function, instance_arn: str, state: str
     ):
         event_pattern = events.EventPattern(
             source=["aws.ec2"],
@@ -404,7 +494,7 @@ class ValheimServerStack(cdk.Stack):
         )
         event_rule = events.Rule(
             self,
-            f"{target_lambda.node.id}EventRule",
+            f"{name}{target_lambda.node.id}EventRule",
             event_pattern=event_pattern,
         )
         event_rule.add_target(

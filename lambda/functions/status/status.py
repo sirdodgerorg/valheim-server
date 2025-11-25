@@ -11,7 +11,7 @@ logger.setLevel(logging.INFO)
 
 def handler(event, context):
     logger.info(f"Received event: {event}")
-    instance_id = event.get("instance_id") or os.environ.get("SERVER_INSTANCE_ID")
+    instance_id = event.get("instance_id")
     server = boto3.resource("ec2").Instance(instance_id)
 
     if server:
@@ -24,11 +24,11 @@ def handler(event, context):
             health_check = ""
         status = f"{server.state.get("Name")}{health_check}"
     else:
-        status = "No instance found"
+        status = f"missing, server instance {instance_id} not found."
 
     resp = requests.patch(
         f"https://discord.com/api/v10/webhooks/{event['application_id']}/{event['token']}/messages/@original",
-        data={"content": f"Status: {status}"},
+        data={"content": f"{event['application_name']} is {status}"},
     )
     logger.info(f"Discord response ({resp.status_code}): {resp.json()}")
     return {"statusCode": 200}

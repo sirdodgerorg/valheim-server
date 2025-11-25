@@ -13,6 +13,14 @@ sqs = boto3.client("sqs")
 
 
 def handler(event, context):
+    """SQS is used as a temporary storage space to bridge the gap between a
+    Discord app sending a start command and an event-driven response. A
+    queue is not the ideal solution since there is a race condition between
+    multiple invocations from different servers. It would be better to use
+    Redis and store the sender's token by instance id. That costs money to
+    maintain though, whereas this has negligible cost. The race condition
+    could be mitigated by requeuing if it were a real concern.
+    """
     logger.info(f"Received event: {event}")
 
     # Pull from queue to update message here
@@ -32,7 +40,7 @@ def handler(event, context):
         resp = requests.patch(
             f"https://discord.com/api/v10/webhooks/{last_msg['application_id']}/{last_msg['token']}/messages/@original",
             data={
-                "content": "Server is ready",
+                "content": f"{last_msg['application_name']} server is ready",
             },
         )
 

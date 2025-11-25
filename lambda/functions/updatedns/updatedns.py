@@ -11,6 +11,11 @@ logger.setLevel(logging.INFO)
 ec2 = boto3.client("ec2")
 route53 = boto3.client("route53")
 
+SERVER_DOMAIN = {
+    "1442796677156175966": "moria",
+    "1370896965881299065": "valheim",
+}
+
 
 def upsert_route53_recordset(hosted_zone_id: str, domain: str, public_ip: str) -> bool:
     """
@@ -48,7 +53,7 @@ def upsert_route53_recordset(hosted_zone_id: str, domain: str, public_ip: str) -
 
 def handler(event, context):
     logger.info("Received event: %s", event)
-    instance_id = event.get("instance_id") or os.environ.get("SERVER_INSTANCE_ID")
+    instance_id = event.get("instance_id")
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     try:
         public_ip = desc["Reservations"][0]["Instances"][0]["PublicIpAddress"]
@@ -56,9 +61,8 @@ def handler(event, context):
         logger.error("Could not get IP address: %s", ex)
         raise
 
-    domain = os.environ.get("ROUTE53_DOMAIN")
+    domain = f"{SERVER_DOMAIN.get(instance_id)}{os.environ.get("ROUTE53_DOMAIN_BASE")}"
     hosted_zone_id = os.environ.get("ROUTE53_HOSTED_ZONE_ID")
-
     success = upsert_route53_recordset(
         hosted_zone_id=hosted_zone_id,
         domain=domain,
