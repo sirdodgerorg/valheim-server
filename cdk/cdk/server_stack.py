@@ -249,7 +249,7 @@ class GameServersStack(cdk.Stack):
         self.efs.connections.allow_default_port_from(self.ec2_moria)
 
         # Allow connections for SSH
-        self.ec2_valheim.connections.allow_from(ec2.Peer.any_ipv4(), ec2.Port.tcp(22))
+        self.ec2_moria.connections.allow_from(ec2.Peer.any_ipv4(), ec2.Port.tcp(22))
 
         ##################################################
         # Discord control
