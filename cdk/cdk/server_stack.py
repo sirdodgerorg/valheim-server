@@ -270,6 +270,7 @@ class GameServersStack(cdk.Stack):
             "APPLICATION_PUBLIC_KEY": os.environ.get("APPLICATION_PUBLIC_KEY"),
             "SERVER_INSTANCE_ID": self.ec2_valheim.instance_id,
             "SQS_SERVER_START_URL": self.server_start_queue.queue_url,
+            "ROUTE53_DOMAIN_BASE": ROUTE53_DOMAIN_BASE,
             "ROUTE53_HOSTED_ZONE_ID": ROUTE53_ZONE_ID,
         }
 
