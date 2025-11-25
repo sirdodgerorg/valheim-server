@@ -31,7 +31,7 @@ aws_lambda = boto3.client("lambda")
 @verify_key_decorator(
     "4763ec4eebb1d89859f3a41ec601ff238f8b5a6047d9961b9590c1d533410658"
 )
-def valheim():
+def moria():
     """https://discord.com/developers/applications/1442796677156175966/information"""
     return discord()
 
