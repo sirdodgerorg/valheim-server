@@ -53,7 +53,7 @@ def upsert_route53_recordset(hosted_zone_id: str, domain: str, public_ip: str) -
 
 def handler(event, context):
     logger.info("Received event: %s", event)
-    instance_id = event.get("instance_id")
+    instance_id = event["detail"]["instance-id"]
     desc = ec2.describe_instances(InstanceIds=[instance_id])
     try:
         public_ip = desc["Reservations"][0]["Instances"][0]["PublicIpAddress"]
