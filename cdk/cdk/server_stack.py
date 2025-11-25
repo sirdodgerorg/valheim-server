@@ -185,6 +185,11 @@ class GameServersStack(cdk.Stack):
         # Moria server
         ##################################################
 
+        # Requires a larger root volume for Docker, cannot use EFS for device mounts
+        self.root_volume_moria = ec2.BlockDevice(
+            device_name="/dev/sda1", volume=ec2.BlockDeviceVolume.ebs(12)
+        )
+
         # EC2 Server Instance - Moria
         self.ec2_moria = ec2.Instance(
             self,
@@ -199,6 +204,7 @@ class GameServersStack(cdk.Stack):
             key_pair=self.keypair,
             allow_all_outbound=True,
             associate_public_ip_address=True,
+            block_devices=[self.root_volume_moria],
             vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
