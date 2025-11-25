@@ -11,7 +11,7 @@ from flask import Flask, jsonify, request
 INTERACTIONS = {"start", "stop", "status"}
 # Map of Discord applications to ec2 instance ids
 SERVER_INSTANCES = {
-    "1442796677156175966": "INSTANCE_ID_MORIA_NOT_SET",  # Moria
+    "1442796677156175966": "i-0eb9dbd53f8d087ed",  # Moria
     "1370896965881299065": "i-000a7e7cda25c4842",  # Valheim
 }
 SERVER_NAMES = {
