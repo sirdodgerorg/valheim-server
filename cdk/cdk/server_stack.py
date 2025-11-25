@@ -427,7 +427,7 @@ class GameServersStack(cdk.Stack):
                 ],
                 conditions={
                     "StringEquals": {
-                        "aws:ResourceTag/project": TAG_VALHEIM,
+                        "aws:ResourceTag/project": TAG_SERVERS,
                     },
                 },
             )
