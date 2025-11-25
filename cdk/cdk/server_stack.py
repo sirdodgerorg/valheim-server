@@ -25,6 +25,8 @@ from aws_cdk import (
 BASENAME = "Valheim"
 PROJECT_TAG_KEY = "project"
 
+LAMBDA_DISCORD_BASE_NAME = "servers"
+
 ROUTE53_DOMAIN_BASE = os.environ.get("ROUTE53_DOMAIN_BASE")
 ROUTE53_ZONE_ID = os.environ.get("ROUTE53_HOSTED_ZONE_ID")
 
@@ -419,9 +421,9 @@ class GameServersStack(cdk.Stack):
                 effect=iam.Effect.ALLOW,
                 actions=["lambda:InvokeFunction"],
                 resources=[
-                    "arn:aws:lambda:us-west-2:399585304222:function:valheim-start",
-                    "arn:aws:lambda:us-west-2:399585304222:function:valheim-status",
-                    "arn:aws:lambda:us-west-2:399585304222:function:valheim-stop",
+                    f"arn:aws:lambda:us-west-2:399585304222:function:{LAMBDA_DISCORD_BASE_NAME}-start",
+                    f"arn:aws:lambda:us-west-2:399585304222:function:{LAMBDA_DISCORD_BASE_NAME}-status",
+                    f"arn:aws:lambda:us-west-2:399585304222:function:{LAMBDA_DISCORD_BASE_NAME}-stop",
                 ],
                 conditions={
                     "StringEquals": {
@@ -479,7 +481,7 @@ class GameServersStack(cdk.Stack):
         log_group = logs.LogGroup(
             self,
             f"LambdaServers{name.capitalize()}LogGroup",
-            log_group_name=f"/aws/lambda/servers-{name}",
+            log_group_name=f"/aws/lambda/{LAMBDA_DISCORD_BASE_NAME}-{name}",
             retention=logs.RetentionDays.ONE_WEEK,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
@@ -488,7 +490,7 @@ class GameServersStack(cdk.Stack):
             f"Servers{name.capitalize()}Lambda",
             runtime=_lambda.Runtime.PYTHON_3_12,
             code=_lambda.AssetCode(f"../lambda/functions/{name}"),
-            function_name=f"servers-{name}",
+            function_name=f"{LAMBDA_DISCORD_BASE_NAME}-{name}",
             handler=f"{name}.handler",
             layers=layers,
             timeout=cdk.Duration.seconds(30),
