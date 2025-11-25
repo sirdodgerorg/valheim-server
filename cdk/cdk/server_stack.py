@@ -27,9 +27,6 @@ PROJECT_TAG_KEY = "project"
 
 LAMBDA_DISCORD_BASE_NAME = "servers"
 
-ROUTE53_DOMAIN_BASE = os.environ.get("ROUTE53_DOMAIN_BASE")
-ROUTE53_ZONE_ID = os.environ.get("ROUTE53_HOSTED_ZONE_ID")
-
 TAG_MORIA = "moria"
 TAG_SERVERS = "servers"
 TAG_VALHEIM = "valheim"
@@ -39,6 +36,9 @@ class GameServersStack(cdk.Stack):
 
     def __init__(self, scope, construct_id, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        route53_domain_base = os.environ.get("ROUTE53_DOMAIN_BASE")
+        route53_zone_id = os.environ.get("ROUTE53_HOSTED_ZONE_ID")
 
         # VPC
         self.vpc = ec2.Vpc(
@@ -126,8 +126,8 @@ class GameServersStack(cdk.Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
         Tags.of(self.ec2_valheim).add(PROJECT_TAG_KEY, TAG_VALHEIM)
-        Tags.of(self.ec2_valheim).add("ROUTE53_HOSTED_ZONE_ID", ROUTE53_ZONE_ID)
-        Tags.of(self.ec2_valheim).add("ROUTE53_DOMAIN", f"valheim{ROUTE53_DOMAIN_BASE}")
+        Tags.of(self.ec2_valheim).add("ROUTE53_HOSTED_ZONE_ID", route53_zone_id)
+        Tags.of(self.ec2_valheim).add("ROUTE53_DOMAIN", f"valheim{route53_domain_base}")
 
         # Add Cloudwatch logging roles
         self.ec2_valheim.role.add_managed_policy(
@@ -200,8 +200,8 @@ class GameServersStack(cdk.Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
         Tags.of(self.ec2_moria).add(PROJECT_TAG_KEY, TAG_MORIA)
-        Tags.of(self.ec2_moria).add("ROUTE53_HOSTED_ZONE_ID", ROUTE53_ZONE_ID)
-        Tags.of(self.ec2_moria).add("ROUTE53_DOMAIN", f"moria{ROUTE53_DOMAIN_BASE}")
+        Tags.of(self.ec2_moria).add("ROUTE53_HOSTED_ZONE_ID", route53_zone_id)
+        Tags.of(self.ec2_moria).add("ROUTE53_DOMAIN", f"moria{route53_domain_base}")
 
         # Add Cloudwatch logging roles
         self.ec2_moria.role.add_managed_policy(
@@ -270,8 +270,8 @@ class GameServersStack(cdk.Stack):
             "APPLICATION_PUBLIC_KEY": os.environ.get("APPLICATION_PUBLIC_KEY"),
             "SERVER_INSTANCE_ID": self.ec2_valheim.instance_id,
             "SQS_SERVER_START_URL": self.server_start_queue.queue_url,
-            "ROUTE53_DOMAIN_BASE": ROUTE53_DOMAIN_BASE,
-            "ROUTE53_HOSTED_ZONE_ID": ROUTE53_ZONE_ID,
+            "ROUTE53_DOMAIN_BASE": route53_domain_base,
+            "ROUTE53_HOSTED_ZONE_ID": route53_zone_id,
         }
 
         lambda_layer = _lambda.LayerVersion(
@@ -378,7 +378,7 @@ class GameServersStack(cdk.Stack):
         )
         self.add_iam_ec2_describe(target_lambda=self.lambda_updatedns)
         self.add_iam_route53_update(
-            target_lambda=self.lambda_updatedns, hosted_zone_id=ROUTE53_ZONE_ID
+            target_lambda=self.lambda_updatedns, hosted_zone_id=route53_zone_id
         )
 
         # Subscribe to running state change to update dns
