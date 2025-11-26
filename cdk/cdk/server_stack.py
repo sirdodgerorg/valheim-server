@@ -320,10 +320,20 @@ class GameServersStack(cdk.Stack):
 
         self.server_start_subscription_filter_valheim = logs.SubscriptionFilter(
             self,
-            f"{BASENAME}LogSubscriptionFilter",
+            f"ValheimLogSubscriptionFilter",
             log_group=self.log_group_valheim,
             destination=logs_destinations.LambdaDestination(self.lambda_startmsg),
             filter_pattern=logs.FilterPattern.literal(r"%.*Opened Steam server%"),
+        )
+
+        self.server_start_subscription_filter_moria = logs.SubscriptionFilter(
+            self,
+            f"MoriaLogSubscriptionFilter",
+            log_group=self.log_group_moria,
+            destination=logs_destinations.LambdaDestination(self.lambda_startmsg),
+            filter_pattern=logs.FilterPattern.literal(
+                r"%.*Started hosting the game.*%"
+            ),
         )
 
         self.lambda_status = self.create_lambda(

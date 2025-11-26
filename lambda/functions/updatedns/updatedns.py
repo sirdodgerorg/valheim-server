@@ -12,7 +12,7 @@ ec2 = boto3.client("ec2")
 route53 = boto3.client("route53")
 
 SERVER_DOMAIN = {
-    "i-0eb9dbd53f8d087ed": "moria",
+    "i-09d189bb90d2212ac": "moria",
     "i-000a7e7cda25c4842": "valheim",
 }
 
