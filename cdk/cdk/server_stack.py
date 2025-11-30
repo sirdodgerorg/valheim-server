@@ -195,7 +195,7 @@ class GameServersStack(cdk.Stack):
             self,
             f"MoriaServer",
             instance_type=ec2.InstanceType.of(
-                instance_class=ec2.InstanceClass.M8A,
+                instance_class=ec2.InstanceClass.M6A,
                 instance_size=ec2.InstanceSize.XLARGE,
             ),
             machine_image=ec2.MachineImage.generic_linux(
